@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Star Route: Algorithm Explorer</title>
+  <style>
+    :root {
+      --bg1: #f4f9ff;
+      --bg2: #eef3ff;
+      --panel: #ffffff;
+      --ink: #1e2a4a;
+      --accent: #5d63ff;
+      --good: #00b894;
+      --bad: #ff5a74;
+      --soft-shadow: 0 10px 30px rgba(73, 88, 160, 0.15);
+      --tile: #dfe6ff;
+      --tile-alt: #cdd8ff;
+      --obstacle: #7f8bb6;
+      --start: #4ac7d9;
+      --goal: #ff9f43;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Inter", "Segoe UI", Roboto, Arial, sans-serif;
+      color: var(--ink);
+      background: radial-gradient(circle at top left, #f7fbff 0%, #eff3ff 45%, #e7eeff 100%);
+      min-height: 100vh;
+    }
+
+    .app {
+      max-width: 1300px;
+      margin: 0 auto;
+      padding: 1rem;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      gap: 1rem;
+    }
+
+    .topbar {
+      background: linear-gradient(135deg, #ffffff, #f1f5ff);
+      border-radius: 20px;
+      box-shadow: var(--soft-shadow);
+      padding: 1rem 1.2rem;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 0.8rem;
+      align-items: center;
+    }
+
+    .title h1 {
+      margin: 0;
+      font-size: clamp(1.2rem, 2.4vw, 1.9rem);
+    }
+    .title p { margin: 0.25rem 0 0; color: #5e6d9f; }
+
+    .stats {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+
+    .pill {
+      background: white;
+      border: 1px solid #dce3ff;
+      border-radius: 999px;
+      padding: 0.45rem 0.9rem;
+      font-size: 0.9rem;
+      font-weight: 600;
+      box-shadow: 0 2px 8px rgba(80, 94, 156, 0.08);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1.5fr 1fr 1.2fr;
+      gap: 1rem;
+      min-height: 68vh;
+    }
+
+    .panel {
+      background: linear-gradient(170deg, #ffffff, #f6f8ff);
+      border-radius: 20px;
+      box-shadow: var(--soft-shadow);
+      border: 1px solid #e5ebff;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.8rem;
+      min-height: 360px;
+    }
+
+    .panel h2 {
+      margin: 0;
+      font-size: 1.1rem;
+    }
+
+    .map-grid {
+      display: grid;
+      gap: 6px;
+      flex: 1;
+      background: #edf2ff;
+      border-radius: 14px;
+      padding: 0.7rem;
+    }
+
+    .tile {
+      border-radius: 10px;
+      background: linear-gradient(140deg, var(--tile), var(--tile-alt));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.3rem;
+      transition: transform 0.2s ease, background 0.2s ease;
+      min-height: 36px;
+    }
+
+    .tile.obstacle { background: linear-gradient(145deg, #9ca8d4, var(--obstacle)); }
+    .tile.start { box-shadow: inset 0 0 0 3px rgba(18, 104, 115, 0.35); }
+    .tile.goal { box-shadow: inset 0 0 0 3px rgba(159, 89, 13, 0.32); }
+    .tile.fan { transform: scale(1.06); }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      font-size: 0.8rem;
+      color: #5e6d9f;
+    }
+
+    .legend span { background: #eef2ff; padding: 0.25rem 0.5rem; border-radius: 999px; }
+
+    .block-list, .program-list {
+      min-height: 230px;
+      background: #f1f5ff;
+      border: 2px dashed #c4d0ff;
+      border-radius: 14px;
+      padding: 0.6rem;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+    }
+
+    .block {
+      border-radius: 14px;
+      padding: 0.65rem 0.8rem;
+      font-weight: 700;
+      color: #fff;
+      cursor: grab;
+      user-select: none;
+      box-shadow: 0 5px 15px rgba(58, 66, 130, 0.2);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.4rem;
+      border: 2px solid rgba(255,255,255,0.25);
+    }
+
+    .block:active { cursor: grabbing; }
+    .block.execute { outline: 3px solid #ffd166; transform: translateX(4px); }
+    .move-up { background: linear-gradient(135deg, #4b7cff, #5aa1ff); }
+    .move-down { background: linear-gradient(135deg, #35c3d6, #31d1b0); }
+    .move-left { background: linear-gradient(135deg, #8c62ff, #b57bff); }
+    .move-right { background: linear-gradient(135deg, #ff7ab4, #ff9a76); }
+    .repeat { background: linear-gradient(135deg, #f8a700, #ffce4b); color: #4d3700; }
+
+    .repeat input {
+      width: 54px;
+      border: none;
+      border-radius: 10px;
+      padding: 0.2rem;
+      text-align: center;
+      font-weight: 700;
+    }
+
+    .delete-zone {
+      border: 2px dashed #ff9aa9;
+      background: #fff0f3;
+      color: #bc3d56;
+      border-radius: 12px;
+      text-align: center;
+      padding: 0.55rem;
+      font-weight: 600;
+    }
+
+    .controls { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    button {
+      border: none;
+      border-radius: 12px;
+      padding: 0.62rem 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+      background: #e5ebff;
+      color: var(--ink);
+      transition: transform 0.18s ease, opacity 0.18s ease;
+    }
+    button:hover { transform: translateY(-1px); }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .primary { background: linear-gradient(135deg, #5863ff, #6f8bff); color: white; }
+    .success { background: linear-gradient(135deg, #00b894, #30d0ae); color: white; }
+
+    .message {
+      min-height: 56px;
+      border-radius: 12px;
+      background: #eef3ff;
+      padding: 0.7rem;
+      font-weight: 600;
+      color: #44558f;
+    }
+
+    .message.ok { background: #e8fff8; color: #06705d; }
+    .message.bad { background: #fff0f3; color: #a62943; }
+
+    .drop-marker {
+      height: 8px;
+      border-radius: 999px;
+      background: #6571ff;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .drop-marker.show { opacity: 1; }
+
+    .completion {
+      position: fixed;
+      inset: 0;
+      background: rgba(21, 26, 50, 0.72);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+      padding: 1rem;
+    }
+    .completion-card {
+      width: min(580px, 95vw);
+      background: linear-gradient(160deg, #ffffff, #f2f6ff);
+      border-radius: 22px;
+      padding: 1.2rem;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.25);
+      text-align: center;
+      animation: pop 0.45s ease;
+    }
+    @keyframes pop {
+      from { transform: scale(0.9); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+    .confetti {
+      font-size: 1.7rem;
+      animation: bounce 0.9s infinite alternate;
+      letter-spacing: 0.2rem;
+    }
+    @keyframes bounce { to { transform: translateY(-7px);} }
+
+    @media (max-width: 1060px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="title">
+        <h1>🌟 Star Route: Algorithm Explorer</h1>
+        <p>Guide your fan to fictional idol Luna Byte on stage by building the right algorithm.</p>
+      </div>
+      <div class="stats">
+        <div class="pill" id="levelLabel">Level 1</div>
+        <div class="pill" id="stepLabel">Step 0 / 0</div>
+        <div class="pill" id="moveLabel">Moves: 0</div>
+        <div class="pill" id="optimalLabel">Optimal: 0</div>
+      </div>
+    </header>
+
+    <div class="message" id="messageBox">Drag instruction blocks into the Program Builder, then press RUN.</div>
+
+    <main class="layout">
+      <section class="panel">
+        <h2>1) Stage Map</h2>
+        <div class="map-grid" id="mapGrid"></div>
+        <div class="legend">
+          <span>🧑 Fan</span><span>🎤 Luna Byte (Goal)</span><span>⛔ Obstacle</span><span>⬜ Walkway</span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>2) Block Library</h2>
+        <p style="margin:0; color:#5d6da0;">Drag blocks into your program.</p>
+        <div class="block-list" id="library"></div>
+        <button id="muteBtn">🔊 Audio On</button>
+      </section>
+
+      <section class="panel">
+        <h2>3) Program Builder</h2>
+        <p style="margin:0; color:#5d6da0;">Drop blocks here, reorder them, or remove in trash.</p>
+        <div class="program-list" id="programList"></div>
+        <div class="delete-zone" id="deleteZone">🗑️ Drop here to delete a block</div>
+        <div class="controls">
+          <button class="primary" id="runBtn">▶ Run</button>
+          <button id="resetProgramBtn">Reset Program</button>
+          <button id="restartLevelBtn">Restart Level</button>
+          <button class="success" id="nextBtn" disabled>Next Level</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="completion" id="completion">
+    <div class="completion-card">
+      <div class="confetti">🎉 ✨ 🎉 ✨ 🎉</div>
+      <h2>All Levels Complete!</h2>
+      <p>You used sequencing, debugging, and loops to solve a real algorithmic problem.</p>
+      <p>That is exactly how digital technologies solve challenges step-by-step.</p>
+      <button onclick="location.reload()">Play Again</button>
+    </div>
+  </div>
+
+  <script>
+    const levels = [
+      {
+        name: 'Level 1 – Sequencing',
+        instruction: 'Build a sequence of moves in the correct order to reach Luna Byte.',
+        learn: 'Sequencing: algorithms run one instruction at a time in order.',
+        optimal: 6,
+        rows: 6, cols: 6,
+        start: [5, 0], goal: [0, 5],
+        obstacles: [[3,1],[3,2],[3,3]]
+      },
+      {
+        name: 'Level 2 – Planning & Debugging',
+        instruction: 'Route around security barriers and cables. If it fails, debug and try again.',
+        learn: 'Debugging: programmers test, find mistakes, and improve their algorithm.',
+        optimal: 10,
+        rows: 7, cols: 7,
+        start: [6, 0], goal: [0, 6],
+        obstacles: [[5,1],[4,1],[3,1],[3,2],[3,3],[5,4],[4,4],[2,5],[1,5]]
+      },
+      {
+        name: 'Level 3 – Loops & Efficiency',
+        instruction: 'A repeating pattern is fastest here. Use REPEAT to reduce code.',
+        learn: 'Loops: loops repeat instructions and make programs shorter and efficient.',
+        optimal: 9,
+        rows: 8, cols: 8,
+        start: [7, 0], goal: [1, 6],
+        obstacles: [[6,2],[5,2],[4,2],[3,2],[2,2],[6,4],[5,4],[4,4],[3,4],[2,4],[1,4],[0,4],[0,1],[1,1],[2,6],[3,6],[4,6],[5,6]]
+      }
+    ];
+
+    const moveDefs = {
+      MOVE_UP: [-1, 0],
+      MOVE_DOWN: [1, 0],
+      MOVE_LEFT: [0, -1],
+      MOVE_RIGHT: [0, 1]
+    };
+
+    const libraryTypes = ['MOVE_UP','MOVE_DOWN','MOVE_LEFT','MOVE_RIGHT','REPEAT'];
+    const state = {
+      levelIndex: 0,
+      program: [],
+      fan: [0,0],
+      running: false,
+      muted: false,
+      ctx: null,
+      musicNode: null
+    };
+
+    const mapGrid = document.getElementById('mapGrid');
+    const library = document.getElementById('library');
+    const programList = document.getElementById('programList');
+    const messageBox = document.getElementById('messageBox');
+    const levelLabel = document.getElementById('levelLabel');
+    const stepLabel = document.getElementById('stepLabel');
+    const moveLabel = document.getElementById('moveLabel');
+    const optimalLabel = document.getElementById('optimalLabel');
+    const runBtn = document.getElementById('runBtn');
+    const nextBtn = document.getElementById('nextBtn');
+
+    function level() { return levels[state.levelIndex]; }
+
+    function setMessage(text, type='') {
+      messageBox.className = `message ${type}`.trim();
+      messageBox.textContent = text;
+    }
+
+    function tone(freq=440, dur=0.08, type='sine', gain=0.03) {
+      if (state.muted) return;
+      if (!state.ctx) state.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const o = state.ctx.createOscillator();
+      const g = state.ctx.createGain();
+      o.frequency.value = freq;
+      o.type = type;
+      g.gain.value = gain;
+      o.connect(g); g.connect(state.ctx.destination);
+      o.start();
+      g.gain.exponentialRampToValueAtTime(0.0001, state.ctx.currentTime + dur);
+      o.stop(state.ctx.currentTime + dur);
+    }
+
+    function setMusic(on) {
+      if (!state.ctx) state.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (on && !state.musicNode && !state.muted) {
+        const osc = state.ctx.createOscillator();
+        const gain = state.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.value = 170;
+        gain.gain.value = 0.012;
+        osc.connect(gain); gain.connect(state.ctx.destination);
+        osc.start();
+        state.musicNode = { osc, gain };
+      } else if ((!on || state.muted) && state.musicNode) {
+        state.musicNode.osc.stop();
+        state.musicNode = null;
+      }
+    }
+
+    function initLibrary() {
+      library.innerHTML = '';
+      libraryTypes.forEach(type => library.appendChild(createBlockElement({id: crypto.randomUUID(), type, count: 2}, true)));
+    }
+
+    function createBlockElement(block, isLibrary = false) {
+      const div = document.createElement('div');
+      div.className = `block ${block.type.toLowerCase().replace('_','-')}`;
+      div.draggable = true;
+      div.dataset.type = block.type;
+      if (!isLibrary) div.dataset.id = block.id;
+      div.innerHTML = `<span>${block.type.replace('_', ' ')}</span>`;
+
+      if (block.type === 'REPEAT') {
+        const wrap = document.createElement('span');
+        wrap.style.display = 'flex';
+        wrap.style.alignItems = 'center';
+        wrap.style.gap = '0.3rem';
+        wrap.innerHTML = 'x';
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = '2';
+        input.max = '8';
+        input.value = block.count || 2;
+        input.title = 'Repeat count';
+        input.addEventListener('click', e => e.stopPropagation());
+        input.addEventListener('change', () => {
+          const value = Math.max(2, Math.min(8, Number(input.value) || 2));
+          input.value = value;
+          if (!isLibrary) {
+            const target = state.program.find(p => p.id === block.id);
+            if (target) target.count = value;
+          }
+        });
+        wrap.appendChild(input);
+        div.appendChild(wrap);
+      }
+
+      if (!isLibrary) {
+        const x = document.createElement('button');
+        x.textContent = '✕';
+        x.style.padding = '0.15rem 0.45rem';
+        x.style.borderRadius = '10px';
+        x.style.background = 'rgba(255,255,255,.3)';
+        x.style.color = 'inherit';
+        x.addEventListener('click', (e) => {
+          e.stopPropagation();
+          state.program = state.program.filter(p => p.id !== block.id);
+          renderProgram();
+        });
+        div.appendChild(x);
+      }
+
+      div.addEventListener('dragstart', (e) => {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', JSON.stringify({
+          source: isLibrary ? 'library' : 'program',
+          id: block.id,
+          type: block.type,
+          count: block.count || 2
+        }));
+      });
+      return div;
+    }
+
+    function renderProgram(activeIndex = -1) {
+      programList.innerHTML = '';
+      state.program.forEach((block, i) => {
+        const marker = document.createElement('div');
+        marker.className = 'drop-marker';
+        marker.dataset.index = i;
+        marker.addEventListener('dragover', onMarkerDrag);
+        marker.addEventListener('dragleave', () => marker.classList.remove('show'));
+        marker.addEventListener('drop', onDropAtMarker);
+        programList.appendChild(marker);
+
+        const el = createBlockElement(block, false);
+        if (i === activeIndex) el.classList.add('execute');
+        programList.appendChild(el);
+      });
+      const endMarker = document.createElement('div');
+      endMarker.className = 'drop-marker';
+      endMarker.dataset.index = state.program.length;
+      endMarker.addEventListener('dragover', onMarkerDrag);
+      endMarker.addEventListener('dragleave', () => endMarker.classList.remove('show'));
+      endMarker.addEventListener('drop', onDropAtMarker);
+      programList.appendChild(endMarker);
+    }
+
+    function onMarkerDrag(e) {
+      e.preventDefault();
+      e.currentTarget.classList.add('show');
+    }
+
+    function onDropAtMarker(e) {
+      e.preventDefault();
+      const marker = e.currentTarget;
+      marker.classList.remove('show');
+      const index = Number(marker.dataset.index);
+      const payload = JSON.parse(e.dataTransfer.getData('text/plain'));
+      if (payload.source === 'library') {
+        state.program.splice(index, 0, {id: crypto.randomUUID(), type: payload.type, count: payload.count || 2});
+      } else {
+        const old = state.program.findIndex(b => b.id === payload.id);
+        if (old === -1) return;
+        const [item] = state.program.splice(old, 1);
+        const adjusted = old < index ? index - 1 : index;
+        state.program.splice(adjusted, 0, item);
+      }
+      renderProgram();
+    }
+
+    function renderMap() {
+      const lv = level();
+      mapGrid.style.gridTemplateColumns = `repeat(${lv.cols}, 1fr)`;
+      mapGrid.innerHTML = '';
+      for (let r = 0; r < lv.rows; r++) {
+        for (let c = 0; c < lv.cols; c++) {
+          const tile = document.createElement('div');
+          tile.className = 'tile';
+          const isObs = lv.obstacles.some(o => o[0] === r && o[1] === c);
+          const isStart = lv.start[0] === r && lv.start[1] === c;
+          const isGoal = lv.goal[0] === r && lv.goal[1] === c;
+          const isFan = state.fan[0] === r && state.fan[1] === c;
+          if (isObs) {
+            tile.classList.add('obstacle');
+            tile.textContent = ['🚧','🎛️','🔌','🛡️'][Math.abs((r*7+c)%4)];
+          }
+          if (isStart) tile.classList.add('start');
+          if (isGoal) { tile.classList.add('goal'); tile.textContent = '🎤'; }
+          if (isFan) { tile.classList.add('fan'); tile.textContent = '🧑'; }
+          mapGrid.appendChild(tile);
+        }
+      }
+    }
+
+    function loadLevel(index) {
+      state.levelIndex = index;
+      state.fan = [...level().start];
+      state.program = [];
+      nextBtn.disabled = true;
+      stepLabel.textContent = 'Step 0 / 0';
+      moveLabel.textContent = 'Moves: 0';
+      levelLabel.textContent = level().name;
+      optimalLabel.textContent = `Optimal: ${level().optimal}`;
+      setMessage(level().instruction);
+      renderProgram();
+      renderMap();
+    }
+
+    function compileProgram() {
+      const compiled = [];
+      for (let i = 0; i < state.program.length; i++) {
+        const block = state.program[i];
+        if (block.type === 'REPEAT') {
+          const prev = state.program[i - 1];
+          if (!prev || !(prev.type in moveDefs)) {
+            return { error: `REPEAT at block ${i + 1} must come after a MOVE block.` };
+          }
+          const times = Number(block.count) || 2;
+          for (let j = 0; j < times - 1; j++) compiled.push({ type: prev.type, src: i });
+        } else {
+          compiled.push({ type: block.type, src: i });
+        }
+      }
+      return { compiled };
+    }
+
+    function checkCollision(pos) {
+      const lv = level();
+      const [r,c] = pos;
+      if (r < 0 || c < 0 || r >= lv.rows || c >= lv.cols) return 'Oops! Your fan moved off the map.';
+      if (lv.obstacles.some(o => o[0] === r && o[1] === c)) return 'Crash! You hit a barrier. Debug your algorithm and try again.';
+      return null;
+    }
+
+    async function runProgram() {
+      if (state.running) return;
+      if (state.program.length === 0) return setMessage('Add some instruction blocks first.', 'bad');
+      const { compiled, error } = compileProgram();
+      if (error) return setMessage(error, 'bad');
+
+      state.running = true;
+      runBtn.disabled = true;
+      nextBtn.disabled = true;
+      state.fan = [...level().start];
+      renderMap();
+
+      for (let i = 0; i < compiled.length; i++) {
+        const step = compiled[i];
+        renderProgram(step.src);
+        stepLabel.textContent = `Step ${i + 1} / ${compiled.length}`;
+        moveLabel.textContent = `Moves: ${i + 1}`;
+        await new Promise(r => setTimeout(r, 400));
+        const [dr, dc] = moveDefs[step.type] || [0,0];
+        state.fan = [state.fan[0] + dr, state.fan[1] + dc];
+        tone(330 + i * 4, 0.06, 'sine', 0.025);
+        const collision = checkCollision(state.fan);
+        renderMap();
+        if (collision) {
+          tone(170, 0.2, 'sawtooth', 0.04);
+          setMessage(collision, 'bad');
+          finishRun(false);
+          return;
+        }
+        if (state.fan[0] === level().goal[0] && state.fan[1] === level().goal[1]) {
+          tone(600, 0.2, 'triangle', 0.04);
+          const efficient = i + 1 <= level().optimal;
+          setMessage(`Success! ${level().learn} ${efficient ? 'Great efficiency too!' : 'See if you can reduce moves toward optimal.'}`, 'ok');
+          nextBtn.disabled = state.levelIndex >= levels.length - 1;
+          finishRun(true);
+          return;
+        }
+      }
+      setMessage('Program finished but did not reach Luna Byte. Adjust your algorithm.', 'bad');
+      finishRun(false);
+    }
+
+    function finishRun(success) {
+      state.running = false;
+      runBtn.disabled = false;
+      renderProgram();
+      if (success && state.levelIndex === levels.length - 1) {
+        setTimeout(() => document.getElementById('completion').style.display = 'flex', 650);
+      }
+    }
+
+    document.getElementById('runBtn').addEventListener('click', runProgram);
+    document.getElementById('resetProgramBtn').addEventListener('click', () => { state.program = []; renderProgram(); setMessage('Program cleared. Build a new algorithm.'); });
+    document.getElementById('restartLevelBtn').addEventListener('click', () => {
+      state.fan = [...level().start];
+      renderMap();
+      stepLabel.textContent = 'Step 0 / 0';
+      moveLabel.textContent = 'Moves: 0';
+      setMessage(level().instruction);
+    });
+    document.getElementById('nextBtn').addEventListener('click', () => {
+      if (state.levelIndex < levels.length - 1) loadLevel(state.levelIndex + 1);
+    });
+
+    document.getElementById('muteBtn').addEventListener('click', (e) => {
+      state.muted = !state.muted;
+      e.target.textContent = state.muted ? '🔈 Audio Off' : '🔊 Audio On';
+      if (state.muted && state.musicNode) setMusic(false);
+      if (!state.muted) setMusic(true);
+    });
+
+    const deleteZone = document.getElementById('deleteZone');
+    deleteZone.addEventListener('dragover', e => e.preventDefault());
+    deleteZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const payload = JSON.parse(e.dataTransfer.getData('text/plain'));
+      if (payload.source === 'program') {
+        state.program = state.program.filter(b => b.id !== payload.id);
+        renderProgram();
+      }
+    });
+
+    loadLevel(0);
+    initLibrary();
+    renderProgram();
+    setMusic(true);
+  </script>
+</body>
+</html>
