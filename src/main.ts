@@ -1,6 +1,5 @@
 declare const BABYLON: any;
 
-type Dir = 0 | 1 | 2 | 3;
 type ProcessAction =
   | 'walk'
   | 'left'
@@ -13,14 +12,24 @@ type ProcessAction =
   | 'paddleAcross'
   | 'offerSnack'
   | 'enterCabin';
-type DecisionAction = 'rockAhead' | 'holeAhead' | 'treeAhead' | 'streamAhead' | 'animalAhead' | 'enoughWood' | 'exitAhead';
-type Tile = '.' | 'S' | 'C' | 'R' | 'H' | 'T' | 'W' | 'A';
+
+type DecisionAction =
+  | 'rockAhead'
+  | 'holeAhead'
+  | 'treeAhead'
+  | 'streamAhead'
+  | 'animalAhead'
+  | 'enoughWood'
+  | 'exitAhead';
+
+type SegmentKind = 'start' | 'path' | 'cabin' | 'rock' | 'hole' | 'tree' | 'stream' | 'animal';
 
 interface ProcessNode {
   id: string;
   type: 'process';
   action: ProcessAction;
 }
+
 interface DecisionNode {
   id: string;
   type: 'decision';
@@ -28,6 +37,7 @@ interface DecisionNode {
   onTrue: ProcessAction | 'none';
   onFalse: ProcessAction | 'none';
 }
+
 type FlowNode = ProcessNode | DecisionNode;
 
 interface Level {
@@ -35,7 +45,7 @@ interface Level {
   instruction: string;
   limit: number;
   perfect: number;
-  grid: string[];
+  path: string;
   actions: ProcessAction[];
   decisions: DecisionAction[];
 }
@@ -43,7 +53,6 @@ interface Level {
 interface ExecResult {
   ok: boolean;
   message?: string;
-  friendly?: boolean;
 }
 
 class CrossTheValley {
@@ -62,7 +71,6 @@ class CrossTheValley {
   private camera: any;
   private player: any;
   private cabinDoor: any;
-  private rockMeshes = new Map<string, any>();
 
   private nodes: FlowNode[] = [];
   private runnerToken = 0;
@@ -72,14 +80,17 @@ class CrossTheValley {
   private highlightBranch: '' | 'true' | 'false' = '';
 
   private levelIndex = 0;
-  private levelTemplate: string[] = [];
-  private pos = { r: 0, c: 0, dir: 1 as Dir };
-  private start = { r: 0, c: 0, dir: 1 as Dir };
-  private cabin = { r: 0, c: 0 };
   private wood = 0;
   private hasBoat = false;
   private enteredCabin = false;
-  private traveled: Array<{ r: number; c: number }> = [];
+  private traveledIndices: number[] = [];
+
+  private checkpointIndex = 0;
+  private checkpoints: any[] = [];
+  private segmentKinds: SegmentKind[] = [];
+  private obstacleMeshes = new Map<number, any>();
+  private cabinIndex = 0;
+  private cabinEntranceIndex = 0;
 
   private readonly levels: Level[] = [
     {
@@ -87,7 +98,7 @@ class CrossTheValley {
       instruction: 'Use Rock/Hole decisions and actions to cross, then Enter Cabin.',
       limit: 6,
       perfect: 5,
-      grid: ['........', '.S.R.H.C', '........'],
+      path: 'S.R.H.C',
       actions: ['walk', 'left', 'right', 'kickRock', 'jump', 'enterCabin'],
       decisions: ['rockAhead', 'holeAhead']
     },
@@ -96,7 +107,7 @@ class CrossTheValley {
       instruction: 'Chop and collect wood, build boat, paddle stream, then Enter Cabin.',
       limit: 8,
       perfect: 7,
-      grid: ['.........', '.S.TW...C', '.........'],
+      path: 'S.TW...C',
       actions: ['walk', 'chopTree', 'collectWood', 'buildBoat', 'paddleAcross', 'enterCabin'],
       decisions: ['treeAhead', 'streamAhead', 'enoughWood']
     },
@@ -105,9 +116,9 @@ class CrossTheValley {
       instruction: 'Combine resources, animal handling, hole jump, and explicit Enter Cabin.',
       limit: 10,
       perfect: 9,
-      grid: ['...........', '.S.TWAW.H.C', '...........'],
-      actions: ['walk', 'chopTree', 'collectWood', 'buildBoat', 'paddleAcross', 'offerSnack', 'jump', 'enterCabin'],
-      decisions: ['treeAhead', 'streamAhead', 'enoughWood', 'animalAhead', 'holeAhead', 'exitAhead']
+      path: 'S.TWAW.H.C',
+      actions: ['walk', 'chopTree', 'collectWood', 'buildBoat', 'paddleAcross', 'offerSnack', 'jump', 'enterCabin', 'kickRock'],
+      decisions: ['treeAhead', 'streamAhead', 'enoughWood', 'animalAhead', 'holeAhead', 'exitAhead', 'rockAhead']
     }
   ];
 
@@ -122,29 +133,23 @@ class CrossTheValley {
 
   private buildScene() {
     const scene = new BABYLON.Scene(this.engine);
-    scene.clearColor = new BABYLON.Color4(0.70, 0.88, 1.0, 1);
+    scene.clearColor = new BABYLON.Color4(0.7, 0.88, 1, 1);
     scene.fogMode = BABYLON.Scene.FOGMODE_EXP;
-    scene.fogDensity = 0.01;
-    scene.fogColor = new BABYLON.Color3(0.80, 0.92, 1.0);
+    scene.fogDensity = 0.009;
+    scene.fogColor = new BABYLON.Color3(0.79, 0.9, 1);
 
     const hemi = new BABYLON.HemisphericLight('hemi', new BABYLON.Vector3(0, 1, 0), scene);
-    hemi.intensity = 0.76;
-    hemi.groundColor = new BABYLON.Color3(0.57, 0.63, 0.43);
-
+    hemi.intensity = 0.78;
     const sun = new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-0.35, -1, -0.18), scene);
-    sun.position = new BABYLON.Vector3(20, 26, -10);
-    sun.intensity = 1.05;
+    sun.position = new BABYLON.Vector3(20, 24, -8);
+    sun.intensity = 1.02;
 
-    // Fixed storybook camera: angled top-down and non-rotating.
-    const arc = new BABYLON.ArcRotateCamera('follow', -Math.PI / 2, 1.02, 19, new BABYLON.Vector3(6, 0, 2), scene);
+    const arc = new BABYLON.ArcRotateCamera('storybook', -Math.PI / 2, 1.04, 27, new BABYLON.Vector3(8, 0, 0), scene);
     arc.lowerAlphaLimit = arc.upperAlphaLimit = arc.alpha;
     arc.lowerBetaLimit = arc.upperBetaLimit = arc.beta;
     arc.lowerRadiusLimit = arc.upperRadiusLimit = arc.radius;
-    arc.panningSensibility = 0;
-    arc.wheelPrecision = 1000000;
     arc.inputs.clear();
     this.camera = arc;
-
     return scene;
   }
 
@@ -157,13 +162,11 @@ class CrossTheValley {
     this.flow.addEventListener('drop', (e) => {
       e.preventDefault();
       if (this.runMode === 'running' || this.runMode === 'stepping') return;
-
       const lv = this.levels[this.levelIndex];
       if (this.nodes.length >= lv.limit) {
         this.setStatus('Algorithm too long. Try solving it with fewer steps.', 'bad');
         return;
       }
-
       const shape = e.dataTransfer?.getData('shape');
       if (shape === 'process') this.nodes.push({ id: crypto.randomUUID(), type: 'process', action: lv.actions[0] });
       if (shape === 'decision') this.nodes.push({ id: crypto.randomUUID(), type: 'decision', condition: lv.decisions[0], onTrue: lv.actions[0], onFalse: 'none' });
@@ -195,429 +198,240 @@ class CrossTheValley {
 
     this.levelIndex = index;
     this.disposeWorld();
-
-    const level = this.levels[index];
-    this.levelTemplate = level.grid.map((r) => r.slice());
     if (!keepFlow) this.nodes = [];
-    this.levelEl.textContent = level.name;
 
     this.wood = 0;
     this.hasBoat = false;
     this.enteredCabin = false;
-    this.traveled = [];
+    this.traveledIndices = [];
+    this.levelEl.textContent = this.levels[index].name;
 
-    this.buildWorld(level.grid);
+    this.buildPathWorld(this.levels[index].path);
     this.player = this.createExplorer();
-    this.snapPlayerToState();
+    this.snapPlayerToCheckpoint();
 
-    this.camera.lockedTarget = this.player;
     this.refreshFlow();
     this.updateHUD();
     this.drawMiniMap();
-    this.setStatus(level.instruction);
+    this.setStatus(this.levels[index].instruction);
   }
 
   private disposeWorld() {
-    this.scene.meshes.slice().forEach((m: any) => {
-      if (m.name !== 'follow') m.dispose();
+    this.scene.meshes.slice().forEach((m: any) => m.dispose());
+    this.obstacleMeshes.clear();
+  }
+
+  private parsePath(path: string): SegmentKind[] {
+    return path.split('').filter((ch) => ch !== '.').map((ch) => {
+      if (ch === 'S') return 'start';
+      if (ch === 'C') return 'cabin';
+      if (ch === 'R') return 'rock';
+      if (ch === 'H') return 'hole';
+      if (ch === 'T') return 'tree';
+      if (ch === 'W') return 'stream';
+      if (ch === 'A') return 'animal';
+      return 'path';
     });
-    this.rockMeshes.clear();
   }
 
-  private buildWorld(grid: string[]) {
-    const matGrass = this.paintedMaterial('#87cd73', '#6ab15f');
-    const matPath = this.paintedMaterial('#cfa77a', '#b08458');
-    const matPathEdge = this.paintedMaterial('#a98358', '#8f6b45', 0.72);
-    const matRock = this.paintedMaterial('#9ca3b3', '#7d8596');
-    const matWater = this.paintedMaterial('#78ccff', '#53b5f2', 0.93);
-    const matHole = this.paintedMaterial('#4a3a35', '#2a221f');
+  private buildPathWorld(rawPath: string) {
+    this.segmentKinds = this.parsePath(rawPath);
+    this.checkpoints = [];
 
-    const rows = grid.length;
-    const cols = grid[0].length;
+    const count = this.segmentKinds.length;
+    const width = count * 3.2 + 26;
+    const terrain = BABYLON.MeshBuilder.CreateGround('terrain', { width, height: 30 }, this.scene);
+    terrain.position.set((count - 1) * 1.6, -0.04, 0);
+    terrain.material = this.material('#82c36e', '#68a95a');
 
-    const terrain = BABYLON.MeshBuilder.CreateGround('terrain', { width: cols * 2 + 18, height: rows * 2 + 18 }, this.scene);
-    terrain.position.set((cols - 1), -0.04, (rows - 1));
-    terrain.material = matGrass;
+    const pathRibbon: any[] = [];
+    for (let i = 0; i < count; i++) {
+      const x = i * 3.2;
+      const z = Math.sin(i * 0.85) * 2.1;
+      this.checkpoints.push(new BABYLON.Vector3(x, 0.78, z));
+      const tile = BABYLON.MeshBuilder.CreateGround(`path-${i}`, { width: 2.8, height: 2.1 }, this.scene);
+      tile.position.set(x, 0, z);
+      tile.rotation.y = Math.sin(i * 0.4) * 0.1;
+      tile.material = this.material('#c69b67', '#ab7f4f');
+      pathRibbon.push(tile);
 
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const t = grid[r][c] as Tile;
-        const x = c * 2;
-        const z = r * 2;
-        const pathTile = t === '.' || t === 'S' || t === 'C';
-
-        const tile = BABYLON.MeshBuilder.CreateGround(`tile-${r}-${c}`, { width: pathTile ? 1.86 : 1.95, height: pathTile ? 1.86 : 1.95 }, this.scene);
-        tile.position.set(x, 0, z);
-        tile.material = pathTile ? matPath : matGrass;
-
-        if (pathTile) {
-          const edge = BABYLON.MeshBuilder.CreateGround(`path-edge-${r}-${c}`, { width: 2.08, height: 2.08 }, this.scene);
-          edge.position.set(x, -0.01, z);
-          edge.material = matPathEdge;
-          edge.visibility = 0.55;
-          if (Math.random() > 0.5) this.makeGrassTuft(x + (Math.random() - 0.5) * 1.2, z + (Math.random() - 0.5) * 1.2, 0.7);
-        }
-
-        if (pathTile && Math.random() > 0.73) this.makeFlower(x + (Math.random() - 0.5) * 0.95, z + (Math.random() - 0.5) * 0.95);
-        if (!pathTile && Math.random() > 0.66) this.makeBush(x + (Math.random() - 0.5) * 0.95, z + (Math.random() - 0.5) * 0.95, 0.82 + Math.random() * 0.35);
-        if (Math.random() > 0.9) this.makePebble(x + (Math.random() - 0.5), z + (Math.random() - 0.5));
-
-        if (t === 'R') this.makeRock(r, c, x, z, matRock);
-        if (t === 'H') this.makeHole(x, z, matHole);
-        if (t === 'T') this.makeTree(x, z);
-        if (t === 'W') this.makeWater(x, z, matWater);
-        if (t === 'A') this.makeAnimal(x, z);
-
-        if (t === 'S') {
-          this.start = { r, c, dir: 1 };
-          this.pos = { ...this.start };
-        }
-        if (t === 'C') {
-          this.cabin = { r, c };
-          this.makeCottage(x, z);
-        }
-      }
+      if (Math.random() > 0.4) this.makeBush(x + (Math.random() - 0.5) * 3.6, z + (Math.random() - 0.5) * 2.8);
+      if (Math.random() > 0.65) this.makeFlower(x + (Math.random() - 0.5) * 2.5, z + (Math.random() - 0.5) * 2.2);
+      if (Math.random() > 0.75) this.makePebble(x + (Math.random() - 0.5) * 3.8, z + (Math.random() - 0.5) * 3.2);
     }
 
-    this.scatterCountrysideProps(rows, cols);
+    this.makeFences(count);
+    for (let i = 0; i < count; i++) this.spawnSegmentVisual(i, this.segmentKinds[i]);
+
+    this.checkpointIndex = 0;
+    this.cabinIndex = this.segmentKinds.findIndex((s) => s === 'cabin');
+    this.cabinEntranceIndex = Math.max(0, this.cabinIndex - 1);
+
+    const center = this.checkpoints[Math.floor(this.checkpoints.length / 2)];
+    this.camera.target = center;
   }
 
-  private scatterCountrysideProps(rows: number, cols: number) {
-    const minX = -6;
-    const maxX = cols * 2 + 4;
-    const minZ = -6;
-    const maxZ = rows * 2 + 4;
-
-    for (let i = 0; i < 26; i++) {
-      const x = minX + Math.random() * (maxX - minX);
-      const z = minZ + Math.random() * (maxZ - minZ);
-      if (Math.random() > 0.55) this.makeTree(x, z, 0.82 + Math.random() * 0.45);
-      else this.makeBush(x, z, 0.6 + Math.random() * 0.55);
-      if (Math.random() > 0.7) this.makeFlower(x + (Math.random() - 0.5), z + (Math.random() - 0.5));
+  private spawnSegmentVisual(index: number, kind: SegmentKind) {
+    const p = this.checkpoints[index];
+    if (kind === 'rock') {
+      const rock = BABYLON.MeshBuilder.CreateSphere(`rock-${index}`, { diameter: 1.4 }, this.scene);
+      rock.scaling = new BABYLON.Vector3(1.2, 0.82, 0.95);
+      rock.position.set(p.x, 0.66, p.z);
+      rock.material = this.material('#9fa7b5', '#808999');
+      this.obstacleMeshes.set(index, rock);
     }
-
-    for (let i = 0; i < 8; i++) {
-      this.makeFence(minX + 2 + i * 2.6, minZ + 1.4, 0);
-      this.makeFence(minX + 2 + i * 2.6, maxZ - 1.2, 0);
+    if (kind === 'hole') {
+      const hole = BABYLON.MeshBuilder.CreateCylinder(`hole-${index}`, { diameter: 1.45, height: 0.15 }, this.scene);
+      hole.position.set(p.x, -0.06, p.z);
+      hole.material = this.material('#3f322c', '#241d1b');
+      this.obstacleMeshes.set(index, hole);
     }
-    for (let i = 0; i < 6; i++) {
-      this.makeFence(minX + 1.1, minZ + 2 + i * 2.5, Math.PI / 2);
-      this.makeFence(maxX - 1.1, minZ + 2 + i * 2.5, Math.PI / 2);
+    if (kind === 'tree') {
+      const trunk = BABYLON.MeshBuilder.CreateCylinder(`tree-trunk-${index}`, { height: 1.2, diameter: 0.34 }, this.scene);
+      trunk.position.set(p.x, 0.6, p.z);
+      trunk.material = this.material('#8d6747', '#6e4e35');
+      const canopyA = BABYLON.MeshBuilder.CreateSphere(`tree-a-${index}`, { diameter: 1.2 }, this.scene);
+      canopyA.position.set(p.x - 0.2, 1.45, p.z + 0.1);
+      canopyA.material = this.material('#72b964', '#569c4f');
+      const canopyB = BABYLON.MeshBuilder.CreateSphere(`tree-b-${index}`, { diameter: 1.05 }, this.scene);
+      canopyB.position.set(p.x + 0.22, 1.52, p.z - 0.12);
+      canopyB.material = this.material('#6eb760', '#4f9447');
+      const tree = BABYLON.Mesh.MergeMeshes([trunk, canopyA, canopyB], true, false, undefined, false, true);
+      this.obstacleMeshes.set(index, tree);
     }
-
-    for (let i = 0; i < 7; i++) {
-      this.makeWheatPatch(minX + 4 + i * 1.8, maxZ - 3.5 + (Math.random() - 0.5) * 1.2);
-      this.makeWheatPatch(maxX - 5 - i * 1.6, minZ + 3 + (Math.random() - 0.5) * 1.2);
+    if (kind === 'stream') {
+      const water = BABYLON.MeshBuilder.CreateGround(`stream-${index}`, { width: 2.8, height: 1.9 }, this.scene);
+      water.position.set(p.x, 0.01, p.z);
+      water.material = this.material('#7bd3ff', '#4daeea', 0.92);
+      this.obstacleMeshes.set(index, water);
+    }
+    if (kind === 'animal') {
+      const body = BABYLON.MeshBuilder.CreateSphere(`animal-body-${index}`, { diameter: 1.1 }, this.scene);
+      body.scaling = new BABYLON.Vector3(1.25, 0.72, 0.85);
+      body.position.set(p.x, 0.6, p.z);
+      body.material = this.material('#d5a071', '#b98255');
+      this.obstacleMeshes.set(index, body);
+    }
+    if (kind === 'cabin') {
+      this.makeCottage(index);
     }
   }
 
-  private makeBush(x: number, z: number, scale = 1) {
-    const c1 = BABYLON.MeshBuilder.CreateSphere('bush-a', { diameter: 0.52 * scale }, this.scene);
-    c1.position.set(x - 0.12 * scale, 0.23 * scale, z + 0.04 * scale);
-    const c2 = BABYLON.MeshBuilder.CreateSphere('bush-b', { diameter: 0.46 * scale }, this.scene);
-    c2.position.set(x + 0.10 * scale, 0.25 * scale, z - 0.05 * scale);
-    const c3 = BABYLON.MeshBuilder.CreateSphere('bush-c', { diameter: 0.40 * scale }, this.scene);
-    c3.position.set(x + 0.02 * scale, 0.33 * scale, z + 0.1 * scale);
-    const mat = this.paintedMaterial('#6fbc63', '#52994a');
-    [c1, c2, c3].forEach((m) => (m.material = mat));
-  }
+  private makeCottage(index: number) {
+    const p = this.checkpoints[index];
+    const base = BABYLON.MeshBuilder.CreateBox('cabin-base', { width: 2.6, height: 1.7, depth: 2.2 }, this.scene);
+    base.position.set(p.x, 0.85, p.z);
+    base.material = this.material('#b8875e', '#906645');
 
-  private makeFlower(x: number, z: number) {
-    const stem = BABYLON.MeshBuilder.CreateCylinder('flower-stem', { height: 0.24, diameter: 0.03 }, this.scene);
-    stem.position.set(x, 0.12, z);
-    stem.material = this.paintedMaterial('#4ca652', '#387b3d');
-    const core = BABYLON.MeshBuilder.CreateSphere('flower-core', { diameter: 0.05 }, this.scene);
-    core.position.set(x, 0.24, z);
-    core.material = this.paintedMaterial('#ffe38a', '#f6c95a');
-    const colors = ['#ff9dc8', '#f3d06f', '#9bcfff'];
-    for (let i = 0; i < 4; i++) {
-      const petal = BABYLON.MeshBuilder.CreateSphere('flower-petal', { diameter: 0.05 }, this.scene);
-      const a = (Math.PI * 2 * i) / 4;
-      petal.position.set(x + Math.cos(a) * 0.05, 0.24, z + Math.sin(a) * 0.05);
-      petal.material = this.paintedMaterial(colors[Math.floor(Math.random() * colors.length)], '#ffffff');
-    }
-  }
-
-  private makeWheatPatch(x: number, z: number) {
-    for (let i = 0; i < 9; i++) {
-      const stalk = BABYLON.MeshBuilder.CreateCylinder('wheat', { height: 0.34 + Math.random() * 0.18, diameter: 0.02 }, this.scene);
-      stalk.position.set(x + (Math.random() - 0.5) * 0.95, 0.2, z + (Math.random() - 0.5) * 0.95);
-      stalk.rotation.z = (Math.random() - 0.5) * 0.22;
-      stalk.material = this.paintedMaterial('#e8d163', '#c8ad46');
-    }
-  }
-
-  private makeFence(x: number, z: number, rotY: number) {
-    const postA = BABYLON.MeshBuilder.CreateBox('fence-post', { width: 0.08, height: 0.36, depth: 0.08 }, this.scene);
-    postA.position.set(x - 0.42 * Math.cos(rotY), 0.18, z - 0.42 * Math.sin(rotY));
-    const postB = BABYLON.MeshBuilder.CreateBox('fence-post', { width: 0.08, height: 0.36, depth: 0.08 }, this.scene);
-    postB.position.set(x + 0.42 * Math.cos(rotY), 0.18, z + 0.42 * Math.sin(rotY));
-    const rail1 = BABYLON.MeshBuilder.CreateBox('fence-rail', { width: 0.9, height: 0.06, depth: 0.05 }, this.scene);
-    rail1.position.set(x, 0.22, z);
-    rail1.rotation.y = rotY;
-    const rail2 = BABYLON.MeshBuilder.CreateBox('fence-rail', { width: 0.9, height: 0.06, depth: 0.05 }, this.scene);
-    rail2.position.set(x, 0.3, z);
-    rail2.rotation.y = rotY;
-    const mat = this.paintedMaterial('#a47f5c', '#76583e');
-    [postA, postB, rail1, rail2].forEach((m) => (m.material = mat));
-  }
-
-  private makePebble(x: number, z: number) {
-    const p = BABYLON.MeshBuilder.CreateSphere('pebble', { diameter: 0.22 }, this.scene);
-    p.position.set(x, 0.1, z);
-    p.scaling = new BABYLON.Vector3(1.4, 0.75, 1.05);
-    p.material = this.paintedMaterial('#b8bcc9', '#8e93a1');
-  }
-
-  private makeRock(r: number, c: number, x: number, z: number, mat: any) {
-    const rock = BABYLON.MeshBuilder.CreateSphere(`rock-${r}-${c}`, { diameter: 1.28 }, this.scene);
-    rock.position.set(x, 0.62, z);
-    rock.scaling = new BABYLON.Vector3(1.22, 0.82, 0.96);
-    rock.material = mat;
-    const moss = BABYLON.MeshBuilder.CreateSphere(`moss-${r}-${c}`, { diameter: 0.52 }, this.scene);
-    moss.position.set(x + 0.23, 0.94, z - 0.1);
-    moss.scaling = new BABYLON.Vector3(1.2, 0.7, 1);
-    moss.material = this.paintedMaterial('#79b865', '#5f954f');
-    this.rockMeshes.set(`${r},${c}`, rock);
-  }
-
-  private makeHole(x: number, z: number, mat: any) {
-    const rim = BABYLON.MeshBuilder.CreateTorus('hole-rim', { diameter: 1.52, thickness: 0.2 }, this.scene);
-    rim.position.set(x, 0.06, z);
-    rim.material = this.paintedMaterial('#765f45', '#4f3d2b');
-    const pit = BABYLON.MeshBuilder.CreateCylinder('hole', { diameter: 1.2, height: 0.34 }, this.scene);
-    pit.position.set(x, 0.02, z);
-    pit.material = mat;
-  }
-
-  private makeTree(x: number, z: number, scale = 1) {
-    const trunk = BABYLON.MeshBuilder.CreateCylinder('trunk', { height: 1.1 * scale, diameter: 0.28 * scale }, this.scene);
-    trunk.position.set(x, 0.56 * scale, z);
-    trunk.material = this.paintedMaterial('#8b5a2b', '#6e431f');
-
-    const blobs = [
-      [-0.18, 1.28, 0.05, 0.92],
-      [0.22, 1.34, -0.08, 0.86],
-      [0.02, 1.52, 0.16, 0.8],
-      [-0.02, 1.45, -0.2, 0.74]
-    ];
-    const leafMat = this.paintedMaterial('#67bb5d', '#4e9646');
-    for (const [ox, oy, oz, d] of blobs) {
-      const leaf = BABYLON.MeshBuilder.CreateSphere('leaf', { diameter: d * scale }, this.scene);
-      leaf.position.set(x + ox * scale, oy * scale, z + oz * scale);
-      leaf.scaling = new BABYLON.Vector3(1.12, 0.95, 1);
-      leaf.material = leafMat;
-    }
-  }
-
-  private makeWater(x: number, z: number, mat: any) {
-    const w = BABYLON.MeshBuilder.CreateGround('water', { width: 1.9, height: 1.9 }, this.scene);
-    w.position.set(x, 0.04, z);
-    w.material = mat;
-    const shine = BABYLON.MeshBuilder.CreateGround('water-shine', { width: 1.25, height: 1.25 }, this.scene);
-    shine.position.set(x + 0.15, 0.05, z - 0.08);
-    shine.material = this.paintedMaterial('#bde8ff', '#8dd5ff', 0.45);
-  }
-
-  private makeAnimal(x: number, z: number) {
-    const body = BABYLON.MeshBuilder.CreateSphere('animal', { diameter: 1.0 }, this.scene);
-    body.position.set(x, 0.52, z);
-    body.material = this.paintedMaterial('#d89b62', '#b8783f');
-    const ear = BABYLON.MeshBuilder.CreateSphere('animal-ear', { diameter: 0.28 }, this.scene);
-    ear.position.set(x + 0.3, 0.9, z + 0.18);
-    ear.material = body.material;
-  }
-
-  private makeCottage(x: number, z: number) {
-    const base = BABYLON.MeshBuilder.CreateBox('cottage-base', { width: 2.24, depth: 2.04, height: 1.44 }, this.scene);
-    base.position.set(x, 0.72, z);
-    base.material = this.paintedMaterial('#f0dfc8', '#d4b99a');
-
-    const timber = this.paintedMaterial('#6f4f35', '#4e3623');
-    for (const ox of [-0.92, 0, 0.92]) {
-      const beam = BABYLON.MeshBuilder.CreateBox('beam-v', { width: 0.09, height: 1.44, depth: 0.09 }, this.scene);
-      beam.position.set(x + ox, 0.72, z + 1.0);
-      beam.material = timber;
-    }
-
-    const roof = BABYLON.MeshBuilder.CreateCylinder('cottage-roof', { diameterTop: 0.15, diameterBottom: 2.9, height: 1.5, tessellation: 4 }, this.scene);
-    roof.position.set(x, 1.9, z);
+    const roof = BABYLON.MeshBuilder.CreateCylinder('cabin-roof', { diameterTop: 0, diameterBottom: 3.2, height: 1.2, tessellation: 4 }, this.scene);
+    roof.rotation.z = Math.PI / 2;
     roof.rotation.y = Math.PI / 4;
-    roof.material = this.paintedMaterial('#d19555', '#b97842');
+    roof.position.set(p.x, 2.0, p.z);
+    roof.material = this.material('#b86b47', '#8f4f34');
 
-    const winMat = this.paintedMaterial('#8cc3ff', '#ffd08a');
-    const winL = BABYLON.MeshBuilder.CreateBox('window-l', { width: 0.36, height: 0.38, depth: 0.06 }, this.scene);
-    winL.position.set(x + 0.68, 0.88, z + 1.02);
-    winL.material = winMat;
-    const winR = BABYLON.MeshBuilder.CreateBox('window-r', { width: 0.36, height: 0.38, depth: 0.06 }, this.scene);
-    winR.position.set(x - 0.68, 0.88, z + 1.02);
-    winR.material = winMat;
+    this.cabinDoor = BABYLON.MeshBuilder.CreateBox('cabin-door', { width: 0.55, height: 1.05, depth: 0.08 }, this.scene);
+    this.cabinDoor.position.set(p.x - 1.26, 0.55, p.z);
+    this.cabinDoor.material = this.material('#7e5438', '#624027');
 
-    this.cabinDoor = BABYLON.MeshBuilder.CreateBox('cottage-door', { width: 0.48, height: 0.82, depth: 0.07 }, this.scene);
-    this.cabinDoor.position.set(x - 0.02, 0.41, z + 1.04);
-    this.cabinDoor.material = timber;
+    const win = BABYLON.MeshBuilder.CreateBox('cabin-win', { width: 0.4, height: 0.33, depth: 0.08 }, this.scene);
+    win.position.set(p.x, 1.0, p.z + 1.1);
+    win.material = this.material('#ffd285', '#f6b85c', 0.95);
+  }
 
-    this.makeBush(x + 1.03, z + 0.74, 0.82);
-    this.makeBush(x - 1.0, z + 0.74, 0.82);
-    this.makeFlower(x + 1.15, z + 1.02);
-    this.makeFlower(x - 1.12, z + 1.04);
-    this.makeGrassTuft(x + 0.82, z + 0.95, 0.9);
-    this.makeGrassTuft(x - 0.78, z + 0.95, 0.9);
+  private makeFences(count: number) {
+    const minX = -4;
+    const maxX = this.checkpoints[count - 1].x + 4;
+    for (let i = 0; i < 10; i++) {
+      this.makeFence(minX + i * ((maxX - minX) / 9), -7.4, 0);
+      this.makeFence(minX + i * ((maxX - minX) / 9), 7.4, 0);
+    }
   }
 
   private createExplorer() {
-    const body = BABYLON.MeshBuilder.CreateCapsule('explorer-body', { height: 1.16, radius: 0.34 }, this.scene);
-    body.position.y = 0.78;
-    body.material = this.material('#6acaff', '#3e9ad6');
-    const bag = BABYLON.MeshBuilder.CreateBox('explorer-bag', { width: 0.4, height: 0.44, depth: 0.2 }, this.scene);
-    bag.position.set(0, 0.82, -0.26);
-    bag.material = this.material('#f2c278', '#d29f49');
-    const eye = BABYLON.MeshBuilder.CreateSphere('explorer-eye', { diameter: 0.12 }, this.scene);
-    eye.position.set(0.12, 1.01, 0.28);
-    eye.material = this.material('#fff', '#ddd');
-    return BABYLON.Mesh.MergeMeshes([body, bag, eye], true, false, undefined, false, true);
-  }
-
-  private makeGrassTuft(x: number, z: number, scale = 1) {
-    for (let i = 0; i < 4; i++) {
-      const blade = BABYLON.MeshBuilder.CreatePlane('grass-blade', { width: 0.09 * scale, height: 0.26 * scale }, this.scene);
-      blade.position.set(x + (Math.random() - 0.5) * 0.24, 0.12 * scale, z + (Math.random() - 0.5) * 0.24);
-      blade.rotation.y = Math.random() * Math.PI;
-      blade.material = this.paintedMaterial('#68b95f', '#4a9349', 0.95);
-    }
-  }
-
-  private paintedMaterial(main: string, accent: string, alpha = 1) {
-    const m = new BABYLON.StandardMaterial(`pm-${Math.random()}`, this.scene);
-    const tex = new BABYLON.DynamicTexture(`dt-${Math.random()}`, { width: 128, height: 128 }, this.scene, false);
-    const ctx = tex.getContext();
-    ctx.fillStyle = main;
-    ctx.fillRect(0, 0, 128, 128);
-    for (let i = 0; i < 28; i++) {
-      ctx.globalAlpha = 0.08 + Math.random() * 0.1;
-      ctx.fillStyle = accent;
-      const r = 6 + Math.random() * 14;
-      const x = Math.random() * 128;
-      const y = Math.random() * 128;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-    tex.update(false);
-    m.diffuseTexture = tex;
-    m.specularColor = new BABYLON.Color3(0.04, 0.04, 0.04);
-    m.emissiveColor = BABYLON.Color3.FromHexString(accent).scale(0.04);
-    m.alpha = alpha;
-    return m;
-  }
-
-  private material(main: string, glow: string, alpha = 1) {
-    const m = new BABYLON.StandardMaterial(`m-${Math.random()}`, this.scene);
-    m.diffuseColor = BABYLON.Color3.FromHexString(main);
-    m.emissiveColor = BABYLON.Color3.FromHexString(glow).scale(0.03);
-    m.specularColor = new BABYLON.Color3(0.03,0.03,0.03);
-    m.alpha = alpha;
-    return m;
+    const body = BABYLON.MeshBuilder.CreateCapsule('explorer-body', { height: 1.4, radius: 0.28 }, this.scene);
+    body.material = this.material('#4f86ff', '#385fd4');
+    const head = BABYLON.MeshBuilder.CreateSphere('explorer-head', { diameter: 0.56 }, this.scene);
+    head.position.y = 1.06;
+    head.material = this.material('#ffe5cb', '#f0c89f');
+    const group = BABYLON.Mesh.MergeMeshes([body, head], true, false, undefined, false, true);
+    group.position = this.checkpoints[0].clone();
+    group.rotation = new BABYLON.Vector3(0, 0, 0);
+    return group;
   }
 
   private refreshFlow(activeId = '') {
-    const lv = this.levels[this.levelIndex];
     this.flow.innerHTML = '';
-    this.flow.append(this.fixedNode('START', activeId === 'start', false));
-    this.flow.append(this.connector());
+    const locked = this.runMode === 'running' || this.runMode === 'stepping';
 
-    this.nodes.forEach((n, idx) => {
-      this.flow.append(this.dynamicNode(n, activeId === n.id, lv));
-      if (idx < this.nodes.length - 1) this.flow.append(this.connector());
+    const start = document.createElement('div');
+    start.className = 'node';
+    start.innerHTML = '<strong style="color:#3f69ff">START</strong>';
+    this.flow.append(start);
+
+    this.nodes.forEach((node, i) => {
+      const d = this.buildNode(node, node.id === activeId, locked);
+      this.flow.append(d);
+      if (i < this.nodes.length - 1) {
+        const conn = document.createElement('div');
+        conn.className = `conn ${node.id === activeId ? 'active' : ''}`;
+        this.flow.append(conn);
+      }
     });
 
-    this.flow.append(this.connector());
-    this.flow.append(this.fixedNode('END', activeId === 'end', false));
+    const end = document.createElement('div');
+    end.className = 'node';
+    end.innerHTML = '<strong style="color:#8b5cf6">END</strong>';
+    this.flow.append(end);
   }
 
-  private fixedNode(title: string, active: boolean, error: boolean) {
+  private buildNode(node: FlowNode, active: boolean, locked: boolean) {
     const d = document.createElement('div');
-    d.className = `node ${active ? 'active' : ''} ${error ? 'error' : ''}`.trim();
-    d.innerHTML = `<span class="shape oval">${title}</span>`;
-    return d;
-  }
-
-  private connector() {
-    const c = document.createElement('div');
-    c.className = 'conn';
-    return c;
-  }
-
-  private dynamicNode(node: FlowNode, active: boolean, lv: Level) {
-    const d = document.createElement('div');
-    const isErr = this.highlightErrorNode === node.id;
-    d.className = `node ${active ? 'active' : ''} ${isErr ? 'error' : ''}`.trim();
-    d.draggable = this.runMode === 'idle' || this.runMode === 'failed' || this.runMode === 'success';
-    d.dataset.id = node.id;
-
-    d.addEventListener('dragstart', (e) => e.dataTransfer?.setData('moveNode', node.id));
-    d.addEventListener('dragover', (e) => e.preventDefault());
-    d.addEventListener('drop', (e) => {
-      e.preventDefault();
-      if (!(this.runMode === 'idle' || this.runMode === 'failed' || this.runMode === 'success')) return;
-      const moveId = e.dataTransfer?.getData('moveNode');
-      if (!moveId || moveId === node.id) return;
-      const from = this.nodes.findIndex((n) => n.id === moveId);
-      const to = this.nodes.findIndex((n) => n.id === node.id);
-      if (from < 0 || to < 0) return;
-      const [picked] = this.nodes.splice(from, 1);
-      this.nodes.splice(to, 0, picked);
-      this.refreshFlow();
-    });
+    d.className = `node ${active ? 'active' : ''} ${this.highlightErrorNode === node.id ? 'error' : ''}`.trim();
 
     const drag = document.createElement('span');
     drag.className = 'drag';
-    drag.textContent = '↕';
+    drag.textContent = '⋮⋮';
     d.append(drag);
 
     if (node.type === 'process') {
-      const shape = document.createElement('span');
-      shape.className = 'shape rect';
-      shape.textContent = 'Process';
-      d.append(shape);
-
-      const action = document.createElement('select');
-      lv.actions.forEach((a) => action.add(new Option(this.actionLabel(a), a)));
-      action.value = node.action;
-      action.disabled = !(this.runMode === 'idle' || this.runMode === 'failed' || this.runMode === 'success');
-      action.onchange = () => (node.action = action.value as ProcessAction);
-      d.append(action);
+      const tag = document.createElement('strong');
+      tag.textContent = 'Process';
+      const select = document.createElement('select');
+      this.levels[this.levelIndex].actions.forEach((a) => select.add(new Option(this.actionLabel(a), a)));
+      select.value = node.action;
+      select.disabled = locked;
+      select.onchange = () => (node.action = select.value as ProcessAction);
+      d.append(tag, select);
     } else {
-      const shape = document.createElement('span');
-      shape.className = 'shape diamond';
-      shape.innerHTML = '<span>Decision</span>';
-      d.append(shape);
-
+      const tag = document.createElement('strong');
+      tag.textContent = 'Decision';
       const cond = document.createElement('select');
-      lv.decisions.forEach((dec) => cond.add(new Option(this.decisionLabel(dec), dec)));
+      this.levels[this.levelIndex].decisions.forEach((c) => cond.add(new Option(this.decisionLabel(c), c)));
       cond.value = node.condition;
-      cond.disabled = !(this.runMode === 'idle' || this.runMode === 'failed' || this.runMode === 'success');
+      cond.disabled = locked;
       cond.onchange = () => (node.condition = cond.value as DecisionAction);
 
       const t = document.createElement('select');
-      ['none', ...lv.actions].forEach((a) => t.add(new Option(`True → ${a === 'none' ? 'Do nothing' : this.actionLabel(a as ProcessAction)}`, a)));
+      ['none', ...this.levels[this.levelIndex].actions].forEach((a) =>
+        t.add(new Option(`True → ${a === 'none' ? 'Do nothing' : this.actionLabel(a as ProcessAction)}`, a))
+      );
       t.value = node.onTrue;
-      t.disabled = cond.disabled;
+      t.disabled = locked;
       t.onchange = () => (node.onTrue = t.value as ProcessAction | 'none');
 
       const f = document.createElement('select');
-      ['none', ...lv.actions].forEach((a) => f.add(new Option(`False → ${a === 'none' ? 'Do nothing' : this.actionLabel(a as ProcessAction)}`, a)));
+      ['none', ...this.levels[this.levelIndex].actions].forEach((a) =>
+        f.add(new Option(`False → ${a === 'none' ? 'Do nothing' : this.actionLabel(a as ProcessAction)}`, a))
+      );
       f.value = node.onFalse;
-      f.disabled = cond.disabled;
+      f.disabled = locked;
       f.onchange = () => (node.onFalse = f.value as ProcessAction | 'none');
 
       const badge = document.createElement('span');
       badge.style.fontWeight = '700';
       badge.style.color = this.highlightBranch === 'true' && active ? '#16a34a' : this.highlightBranch === 'false' && active ? '#d97706' : '#5b6ea7';
       badge.textContent = this.highlightBranch && active ? `Branch: ${this.highlightBranch.toUpperCase()}` : 'Branch: -';
-
-      d.append(cond, t, f, badge);
+      d.append(tag, cond, t, f, badge);
     }
 
     const del = document.createElement('button');
@@ -636,69 +450,53 @@ class CrossTheValley {
 
   private actionLabel(a: ProcessAction) {
     return {
-      walk: 'Walk Forward', left: 'Turn Left', right: 'Turn Right', kickRock: 'KICK ROCK', jump: 'Jump',
-      chopTree: 'Chop Tree', collectWood: 'Collect Wood', buildBoat: 'Build Boat', paddleAcross: 'Paddle Across',
-      offerSnack: 'Offer Snack', enterCabin: 'Enter Cabin'
+      walk: 'Walk Forward',
+      left: 'Turn Left',
+      right: 'Turn Right',
+      kickRock: 'KICK ROCK',
+      jump: 'Jump',
+      chopTree: 'Chop Tree',
+      collectWood: 'Collect Wood',
+      buildBoat: 'Build Boat',
+      paddleAcross: 'Paddle Across',
+      offerSnack: 'Offer Snack',
+      enterCabin: 'Enter Cabin'
     }[a];
   }
 
   private decisionLabel(d: DecisionAction) {
     return {
-      rockAhead: 'Rock ahead?', holeAhead: 'Hole ahead?', treeAhead: 'Tree ahead?', streamAhead: 'Stream ahead?',
-      animalAhead: 'Animal ahead?', enoughWood: 'Enough wood?', exitAhead: 'Exit ahead?'
+      rockAhead: 'Rock ahead?',
+      holeAhead: 'Hole ahead?',
+      treeAhead: 'Tree ahead?',
+      streamAhead: 'Stream ahead?',
+      animalAhead: 'Animal ahead?',
+      enoughWood: 'Enough wood?',
+      exitAhead: 'Exit ahead?'
     }[d];
   }
 
-  private front(state = this.pos) {
-    const delta = [[-1, 0], [0, 1], [1, 0], [0, -1]][state.dir];
-    return { r: state.r + delta[0], c: state.c + delta[1] };
+  private getAheadIndex() {
+    return this.checkpointIndex + 1;
   }
 
-  private cell(r: number, c: number): Tile {
-    const g = this.levelTemplate;
-    if (r < 0 || c < 0 || r >= g.length || c >= g[0].length) return 'R';
-    return g[r][c] as Tile;
+  private getSegment(index: number): SegmentKind | 'void' {
+    if (index < 0 || index >= this.segmentKinds.length) return 'void';
+    return this.segmentKinds[index];
   }
-
-  private setCell(r: number, c: number, tile: Tile) {
-    const rows = this.levelTemplate.map((line) => line.split(''));
-    rows[r][c] = tile;
-    this.levelTemplate = rows.map((r) => r.join(''));
-  }
-
-  private isInside(r: number, c: number) {
-    const g = this.levelTemplate;
-    return r >= 0 && c >= 0 && r < g.length && c < g[0].length;
-  }
-
-  private nextTileState() {
-    const f = this.front();
-    if (!this.isInside(f.r, f.c)) return { ok: false as const, reason: 'Cannot move forward — edge of the map.', r: f.r, c: f.c, tile: 'R' as Tile };
-    return { ok: true as const, reason: '', r: f.r, c: f.c, tile: this.cell(f.r, f.c) };
-  }
-
-  private isBlockedForRobot(tile: Tile) {
-    return tile === 'R' || tile === 'T' || tile === 'W' || tile === 'A' || tile === 'H';
-  }
-
 
   private async runAll() {
     if (this.runMode === 'running' || this.runMode === 'stepping') return;
-    if (this.nodes.length === 0) {
-      this.setStatus('Add a few flowchart blocks first, then press Run.');
-      return;
-    }
-    if (this.nodes.length > this.levels[this.levelIndex].limit) {
-      this.setStatus('Algorithm too long. Try solving it with fewer steps.', 'bad');
-      return;
-    }
+    if (this.nodes.length === 0) return this.setStatus('Add a few flowchart blocks first, then press Run.');
+    if (this.nodes.length > this.levels[this.levelIndex].limit) return this.setStatus('Algorithm too long. Try solving it with fewer steps.', 'bad');
 
     this.runMode = 'running';
     const token = ++this.runnerToken;
+
     while (this.runMode === 'running' && this.pointer < this.nodes.length) {
       const ok = await this.executeAtPointer(token);
       if (!ok) break;
-      await this.wait(260, token);
+      await this.wait(240, token);
     }
 
     if (this.runMode === 'running') this.runMode = 'idle';
@@ -706,10 +504,8 @@ class CrossTheValley {
 
   private async stepOnce() {
     if (this.runMode === 'running' || this.runMode === 'stepping') return;
-    if (this.pointer >= this.nodes.length) {
-      this.setStatus('No more blocks. Add more or Reset to try again.');
-      return;
-    }
+    if (this.pointer >= this.nodes.length) return this.setStatus('No more blocks. Add more or Reset to try again.');
+
     this.runMode = 'stepping';
     const token = ++this.runnerToken;
     const ok = await this.executeAtPointer(token);
@@ -725,28 +521,39 @@ class CrossTheValley {
     this.stepEl.textContent = `Step ${this.pointer + 1}`;
     this.refreshFlow(node.id);
 
+    const before = { index: this.checkpointIndex, pos: this.checkpoints[this.checkpointIndex]?.clone() };
     let result: ExecResult = { ok: true };
-
-    const before = { r: this.pos.r, c: this.pos.c, dir: this.pos.dir };
-    let executedAction: string = node.type === 'process' ? node.action : 'none';
+    let executedAction = node.type === 'process' ? node.action : 'none';
 
     if (node.type === 'process') {
-      result = await this.performAction(node.action, node.id, token);
+      result = await this.performAction(node.action, token);
     } else {
       const yes = this.evaluateDecision(node.condition);
       this.highlightBranch = yes ? 'true' : 'false';
       this.refreshFlow(node.id);
-      this.setStatus(`${this.decisionLabel(node.condition)} ${yes ? 'Yes' : 'No'}.`);
-      await this.wait(180, token);
+      await this.wait(160, token);
       const action = yes ? node.onTrue : node.onFalse;
       executedAction = action;
-      this.setStatus(`Decision chose: ${action === 'none' ? 'Do nothing' : this.actionLabel(action as ProcessAction)}.`);
-      if (action !== 'none') result = await this.performAction(action as ProcessAction, node.id, token);
-      console.log('[FlowExec]', { step: this.pointer + 1, blockType: 'decision', decision: node.condition, decisionResult: yes, actionExecuted: action, before, after: { r: this.pos.r, c: this.pos.c, dir: this.pos.dir } });
+      if (action !== 'none') result = await this.performAction(action as ProcessAction, token);
+      console.log('[FlowExec]', {
+        step: this.pointer + 1,
+        blockType: 'decision',
+        decision: node.condition,
+        decisionResult: yes,
+        actionExecuted: action,
+        beforeIndex: before.index,
+        afterIndex: this.checkpointIndex
+      });
     }
 
     if (node.type === 'process') {
-      console.log('[FlowExec]', { step: this.pointer + 1, blockType: 'process', actionExecuted: executedAction, before, after: { r: this.pos.r, c: this.pos.c, dir: this.pos.dir } });
+      console.log('[FlowExec]', {
+        step: this.pointer + 1,
+        blockType: 'process',
+        actionExecuted: executedAction,
+        beforeIndex: before.index,
+        afterIndex: this.checkpointIndex
+      });
     }
 
     if (!result.ok) {
@@ -761,93 +568,92 @@ class CrossTheValley {
     this.pointer += 1;
     this.highlightBranch = '';
     this.refreshFlow();
-    this.validateSync();
+    this.drawMiniMap();
+    this.updateHUD();
     return true;
   }
 
   private evaluateDecision(d: DecisionAction) {
-    const f = this.front();
-    const ahead = this.cell(f.r, f.c);
-    if (d === 'rockAhead') return ahead === 'R';
-    if (d === 'holeAhead') return ahead === 'H';
-    if (d === 'treeAhead') return ahead === 'T';
-    if (d === 'streamAhead') return ahead === 'W';
-    if (d === 'animalAhead') return ahead === 'A';
+    const ahead = this.getSegment(this.getAheadIndex());
+    if (d === 'rockAhead') return ahead === 'rock';
+    if (d === 'holeAhead') return ahead === 'hole';
+    if (d === 'treeAhead') return ahead === 'tree';
+    if (d === 'streamAhead') return ahead === 'stream';
+    if (d === 'animalAhead') return ahead === 'animal';
     if (d === 'enoughWood') return this.wood > 0;
-    if (d === 'exitAhead') return ahead === 'C';
+    if (d === 'exitAhead') return ahead === 'cabin';
     return false;
   }
 
-  private async performAction(action: ProcessAction, _nodeId: string, token: number): Promise<ExecResult> {
+  private async performAction(action: ProcessAction, token: number): Promise<ExecResult> {
     if (token !== this.runnerToken) return { ok: false, message: 'Run interrupted.' };
 
     if (action === 'left' || action === 'right') {
-      this.pos.dir = ((this.pos.dir + (action === 'right' ? 1 : 3)) % 4) as Dir;
-      await this.animate(this.player, 'rotation.y', this.player.rotation.y, this.pos.dir * (Math.PI / 2), 12, token);
-      this.drawMiniMap();
+      const delta = action === 'right' ? 0.45 : -0.45;
+      await this.animate(this.player, 'rotation.y', this.player.rotation.y, this.player.rotation.y + delta, 8, token);
+      this.setStatus(action === 'right' ? 'Turned right.' : 'Turned left.');
       return { ok: true };
     }
 
     if (action === 'enterCabin') {
-      if (this.pos.r === this.cabin.r && this.pos.c === this.cabin.c) {
+      if (this.checkpointIndex === this.cabinEntranceIndex) {
         this.enteredCabin = true;
-        await this.animate(this.cabinDoor, 'rotation.y', this.cabinDoor.rotation.y, -1.25, 16, token);
+        await this.animate(this.cabinDoor, 'rotation.y', this.cabinDoor.rotation.y, -1.15, 16, token);
+        await this.moveToIndex(this.cabinIndex, token, false);
         this.onSuccess();
         return { ok: true };
       }
-      if (this.evaluateDecision('exitAhead')) return { ok: false, message: 'The cabin is still ahead.' };
-      return { ok: false, message: 'You tried to enter the cabin too early.' };
+      return { ok: false, message: 'The cabin is still ahead — keep going.' };
     }
 
-    const next = this.nextTileState();
-    const f = { r: next.r, c: next.c };
-    const ahead = next.tile;
+    const aheadIndex = this.getAheadIndex();
+    const ahead = this.getSegment(aheadIndex);
 
     if (action === 'walk') {
-      if (!next.ok) return { ok: false, message: next.reason };
-      if (ahead === 'R') return { ok: false, message: 'Blocked by rock. Use KICK ROCK.' };
-      if (ahead === 'H') return { ok: false, message: 'There is a hole ahead. Try Jump.' };
-      if (ahead === 'T') return { ok: false, message: 'A tree blocks the trail. Try Chop Tree first.' };
-      if (ahead === 'W') return { ok: false, message: 'A stream blocks this step. Build a boat, then paddle.' };
-      if (ahead === 'A') return { ok: false, message: 'An animal blocks the path. Offer Snack first.' };
-
-      await this.moveTo(f.r, f.c, token, false);
-      if (this.pos.r === this.cabin.r && this.pos.c === this.cabin.c && !this.enteredCabin) {
-        this.setStatus('Cabin reached, but the algorithm is incomplete. Add Enter Cabin.', 'bad');
+      if (ahead === 'void') return { ok: false, message: 'Cannot move forward from here.' };
+      if (['rock', 'hole', 'tree', 'stream', 'animal'].includes(ahead)) {
+        return { ok: false, message: `Path blocked ahead by ${ahead}.` };
       }
+      await this.moveToIndex(aheadIndex, token, false);
+      if (this.checkpointIndex === this.cabinEntranceIndex) this.setStatus('You are at the cabin entrance. Use Enter Cabin.');
       return { ok: true };
     }
 
     if (action === 'kickRock') {
-      if (!next.ok) return { ok: false, message: 'There’s no rock to kick.' };
-      if (ahead !== 'R') return { ok: false, message: 'There’s no rock to kick.' };
-      const kickResult = await this.kickRockAside(f.r, f.c, token);
-      if (!kickResult.ok) return kickResult;
-      this.drawMiniMap();
+      if (ahead !== 'rock') return { ok: false, message: 'There’s no rock to kick.' };
+      const mesh = this.obstacleMeshes.get(aheadIndex);
+      if (!mesh) return { ok: false, message: 'Cannot kick rock right now.' };
+      await this.animate(this.player, 'position.x', this.player.position.x, this.player.position.x + 0.35, 5, token);
+      await this.animate(this.player, 'position.x', this.player.position.x + 0.35, this.player.position.x, 5, token);
+      const target = mesh.position.clone();
+      target.z += 1.8;
+      await this.animate(mesh, 'position', mesh.position.clone(), target, 11, token);
+      this.segmentKinds[aheadIndex] = 'path';
       this.setStatus('Rock kicked aside. Path is clear.');
       return { ok: true };
     }
 
     if (action === 'jump') {
-      if (!next.ok) return { ok: false, message: next.reason };
-      if (ahead !== 'H') return { ok: false, message: 'Jump works only when a hole is directly ahead.' };
-      const landing = this.front({ r: f.r, c: f.c, dir: this.pos.dir });
-      if (!this.isInside(landing.r, landing.c)) return { ok: false, message: 'Cannot jump out of bounds.' };
-      const landingTile = this.cell(landing.r, landing.c);
-      if (this.isBlockedForRobot(landingTile)) return { ok: false, message: 'No safe landing tile beyond the hole.' };
-      await this.moveTo(landing.r, landing.c, token, true);
+      if (ahead !== 'hole') return { ok: false, message: 'Jump only works when a hole is ahead.' };
+      const landing = aheadIndex + 1;
+      const landingKind = this.getSegment(landing);
+      if (landingKind === 'void' || ['rock', 'hole', 'tree', 'stream', 'animal'].includes(landingKind)) {
+        return { ok: false, message: 'No safe landing point after the hole.' };
+      }
+      await this.moveToIndex(landing, token, true);
       return { ok: true };
     }
 
     if (action === 'chopTree') {
-      if (ahead !== 'T') return { ok: false, message: 'No tree ahead to chop right now.' };
-      this.setCell(f.r, f.c, '.');
+      if (ahead !== 'tree') return { ok: false, message: 'No tree ahead to chop right now.' };
+      this.segmentKinds[aheadIndex] = 'path';
+      this.obstacleMeshes.get(aheadIndex)?.dispose();
+      this.obstacleMeshes.delete(aheadIndex);
       this.setStatus('Chop! The trail is open.');
       return { ok: true };
     }
 
     if (action === 'collectWood') {
-      if (ahead !== '.' && ahead !== 'W' && ahead !== 'C') return { ok: false, message: 'There is no loose wood to collect here.' };
       this.wood += 1;
       this.updateHUD();
       this.setStatus('Wood collected. Great planning!');
@@ -859,101 +665,54 @@ class CrossTheValley {
       this.wood -= 1;
       this.hasBoat = true;
       this.updateHUD();
-      this.setStatus('Boat ready! Now paddle across the stream.');
+      this.setStatus('Boat ready!');
       return { ok: true };
     }
 
     if (action === 'paddleAcross') {
-      if (ahead !== 'W') return { ok: false, message: 'Paddle Across only works when a stream is ahead.' };
+      if (ahead !== 'stream') return { ok: false, message: 'Paddle Across only works when a stream is ahead.' };
       if (!this.hasBoat) return { ok: false, message: 'Build a boat first, then paddle.' };
       this.hasBoat = false;
-      await this.moveTo(f.r, f.c, token, true);
-      this.setStatus('Smooth crossing!');
+      this.segmentKinds[aheadIndex] = 'path';
+      await this.moveToIndex(aheadIndex, token, true);
       return { ok: true };
     }
 
     if (action === 'offerSnack') {
-      if (ahead !== 'A') return { ok: false, message: 'No animal ahead right now for a snack break.' };
-      this.setCell(f.r, f.c, '.');
-      this.setStatus('The animal happily moved aside 🐾');
+      if (ahead !== 'animal') return { ok: false, message: 'No animal ahead right now.' };
+      this.segmentKinds[aheadIndex] = 'path';
+      this.obstacleMeshes.get(aheadIndex)?.dispose();
+      this.obstacleMeshes.delete(aheadIndex);
+      this.setStatus('The animal happily moves aside.');
       return { ok: true };
     }
 
     return { ok: true };
   }
 
+  private async moveToIndex(index: number, token: number, jumpArc: boolean) {
+    const startPos = this.player.position.clone();
+    const next = this.checkpoints[index].clone();
+    const dir = next.subtract(startPos).normalize();
+    const targetYaw = Math.atan2(dir.x, dir.z);
 
-  private async kickRockAside(r: number, c: number, token: number): Promise<ExecResult> {
-    const key = `${r},${c}`;
-    const rock = this.rockMeshes.get(key);
-    if (!rock) return { ok: false, message: 'Cannot kick rock right now.' };
-
-    // determine sideways destination (left first, then right)
-    const leftDir = ((this.pos.dir + 3) % 4) as Dir;
-    const rightDir = ((this.pos.dir + 1) % 4) as Dir;
-    const left = this.front({ r, c, dir: leftDir });
-    const right = this.front({ r, c, dir: rightDir });
-
-    let dest = left;
-    if (!(this.isInside(left.r, left.c) && this.cell(left.r, left.c) === '.')) {
-      if (this.isInside(right.r, right.c) && this.cell(right.r, right.c) === '.') dest = right;
-      else return { ok: false, message: 'No valid tile to kick rock into.' };
+    await this.animate(this.player, 'rotation.y', this.player.rotation.y, targetYaw, 10, token);
+    if (jumpArc) {
+      await this.animate(this.player, 'position.y', this.player.position.y, this.player.position.y + 1.0, 8, token);
+      await this.animate(this.player, 'position.y', this.player.position.y + 1.0, next.y, 8, token);
     }
+    await this.animate(this.player, 'position', startPos, next, 20, token);
 
-    // kick motion cue
-    await this.animate(this.player, 'rotation.x', 0, 0.12, 4, token);
-    await this.animate(this.player, 'rotation.x', 0.12, 0, 5, token);
-
-    const target = new BABYLON.Vector3(dest.c * 2, 0.65, dest.r * 2);
-    await this.animate(rock, 'position.y', rock.position.y, rock.position.y + 0.22, 5, token);
-    await this.animate(rock, 'position', rock.position.clone(), target, 10, token);
-    await this.animate(rock, 'rotation.z', 0, (dest.c < c || dest.r < r) ? -1.2 : 1.2, 10, token);
-    await this.animate(rock, 'position.y', rock.position.y + 0.22, 0.65, 6, token);
-
-    // update grid + rock lookup
-    this.setCell(r, c, '.');
-    this.setCell(dest.r, dest.c, 'R');
-    this.rockMeshes.delete(key);
-    this.rockMeshes.set(`${dest.r},${dest.c}`, rock);
-
-    this.spawnDust(this.pos.c * 2, this.pos.r * 2);
-    return { ok: true };
-  }
-
-  private spawnDust(x: number, z: number) {
-    for (let i = 0; i < 5; i++) {
-      const puff = BABYLON.MeshBuilder.CreateSphere(`dust-${Math.random()}`, { diameter: 0.12 + Math.random() * 0.08 }, this.scene);
-      puff.position.set(x + (Math.random() - 0.5) * 0.35, 0.2 + Math.random() * 0.15, z + (Math.random() - 0.5) * 0.35);
-      puff.material = this.material('#d3b38e', '#b79067', 0.7);
-      setTimeout(() => puff.dispose(), 420);
-    }
-  }
-
-  private async moveTo(r: number, c: number, token: number, arc: boolean) {
-    const start = this.player.position.clone();
-    const end = new BABYLON.Vector3(c * 2, 0.78, r * 2);
-
-    this.pos.r = r;
-    this.pos.c = c;
-    this.traveled.push({ r, c });
-
-    if (arc) {
-      await this.animate(this.player, 'position.y', 0.78, 1.36, 8, token);
-      await this.animate(this.player, 'position.y', 1.36, 0.78, 8, token);
-    }
-    await this.animate(this.player, 'position', start, end, 16, token);
-
-    this.validateSync();
+    this.checkpointIndex = index;
+    this.traveledIndices.push(index);
     this.drawMiniMap();
-    this.updateHUD();
   }
 
   private async failureNudge(token: number) {
-    const original = this.player.rotation.z;
-    await this.animate(this.player, 'rotation.z', original, 0.2, 5, token);
-    await this.animate(this.player, 'rotation.z', 0.2, -0.2, 6, token);
-    await this.animate(this.player, 'rotation.z', -0.2, 0, 6, token);
-    await this.wait(250, token);
+    await this.animate(this.player, 'rotation.z', 0, 0.22, 5, token);
+    await this.animate(this.player, 'rotation.z', 0.22, -0.22, 8, token);
+    await this.animate(this.player, 'rotation.z', -0.22, 0, 5, token);
+    await this.wait(220, token);
   }
 
   private animate(target: any, prop: string, from: any, to: any, frames: number, token: number) {
@@ -963,48 +722,24 @@ class CrossTheValley {
 
   private wait(ms: number, token: number) {
     return new Promise<void>((resolve) => {
-      const started = this.runnerToken;
-      setTimeout(() => {
-        if (token === started && token === this.runnerToken) resolve();
-        else resolve();
-      }, ms);
+      const id = this.runnerToken;
+      setTimeout(() => resolve(void (token === id)), ms);
     });
   }
 
-  private validateSync() {
-    const rows = this.levelTemplate.length;
-    const cols = this.levelTemplate[0].length;
-    if (this.pos.r < 0 || this.pos.c < 0 || this.pos.r >= rows || this.pos.c >= cols) {
-      this.setStatus('Quick safety reset: explorer returned to the trail start.', 'bad');
-      this.resetLevel();
-      return;
-    }
-
-    const target = new BABYLON.Vector3(this.pos.c * 2, 0.78, this.pos.r * 2);
-    const current = this.player.position;
-    const dx = Math.abs(current.x - target.x);
-    const dz = Math.abs(current.z - target.z);
-    if (dx > 0.35 || dz > 0.35) {
-      this.player.position = target;
-    }
-  }
-
-  private snapPlayerToState() {
-    this.player.position = new BABYLON.Vector3(this.pos.c * 2, 0.78, this.pos.r * 2);
-    this.player.rotation = new BABYLON.Vector3(0, this.pos.dir * (Math.PI / 2), 0);
+  private snapPlayerToCheckpoint() {
+    this.checkpointIndex = 0;
+    this.player.position = this.checkpoints[0].clone();
+    this.player.rotation = new BABYLON.Vector3(0, 0, 0);
+    this.traveledIndices = [0];
   }
 
   private onSuccess() {
     this.runMode = 'success';
-    this.stepEl.textContent = `Step ${this.pointer + 1}`;
     this.flow.querySelectorAll('.node').forEach((n) => n.classList.add('success'));
-    const stars = this.computeStars();
-    this.setStatus(`Success! You reached home and entered the cabin. ⭐ ${stars}/3`, 'good');
+    this.setStatus(`Success! You reached home and entered the cabin. ⭐ ${this.computeStars()}/3`, 'good');
     this.updateHUD();
-
-    if (this.levelIndex < this.levels.length - 1) {
-      setTimeout(() => this.loadLevel(this.levelIndex + 1), 1400);
-    }
+    if (this.levelIndex < this.levels.length - 1) setTimeout(() => this.loadLevel(this.levelIndex + 1), 1400);
   }
 
   private computeStars() {
@@ -1033,40 +768,107 @@ class CrossTheValley {
 
   private drawMiniMap() {
     const ctx = this.miniCanvas.getContext('2d')!;
-    const g = this.levelTemplate;
-    const rows = g.length;
-    const cols = g[0].length;
-    const cell = Math.min(this.miniCanvas.width / cols, this.miniCanvas.height / rows);
-
     ctx.clearRect(0, 0, this.miniCanvas.width, this.miniCanvas.height);
-    const color: Record<string, string> = {
-      '.': '#c79862', S: '#5ec8ff', C: '#ffb772', R: '#8790a2', H: '#302b35', T: '#4aaa4d', W: '#64c8ff', A: '#da9a63'
+
+    if (this.checkpoints.length === 0) return;
+    const xs = this.checkpoints.map((p: any) => p.x);
+    const zs = this.checkpoints.map((p: any) => p.z);
+    const minX = Math.min(...xs) - 2;
+    const maxX = Math.max(...xs) + 2;
+    const minZ = Math.min(...zs) - 2;
+    const maxZ = Math.max(...zs) + 2;
+
+    const proj = (p: any) => {
+      const x = ((p.x - minX) / (maxX - minX)) * (this.miniCanvas.width - 20) + 10;
+      const y = ((p.z - minZ) / (maxZ - minZ)) * (this.miniCanvas.height - 20) + 10;
+      return { x, y };
     };
 
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const tile = g[r][c];
-        ctx.fillStyle = color[tile] || '#ccc';
-        ctx.fillRect(c * cell + 1, r * cell + 1, cell - 2, cell - 2);
-      }
-    }
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = '#c89c69';
+    ctx.beginPath();
+    this.checkpoints.forEach((p: any, i: number) => {
+      const q = proj(p);
+      if (i === 0) ctx.moveTo(q.x, q.y);
+      else ctx.lineTo(q.x, q.y);
+    });
+    ctx.stroke();
 
-    this.traveled.forEach((p) => {
-      ctx.fillStyle = 'rgba(255,255,255,.5)';
-      ctx.fillRect(p.c * cell + cell * 0.3, p.r * cell + cell * 0.3, cell * 0.4, cell * 0.4);
+    this.segmentKinds.forEach((k, i) => {
+      if (k === 'path' || k === 'start' || k === 'cabin') return;
+      const q = proj(this.checkpoints[i]);
+      ctx.fillStyle = { rock: '#7f8797', hole: '#2f2b31', tree: '#49a64d', stream: '#57c0f5', animal: '#c58957' }[k] || '#999';
+      ctx.beginPath();
+      ctx.arc(q.x, q.y, 5, 0, Math.PI * 2);
+      ctx.fill();
     });
 
+    this.traveledIndices.forEach((i) => {
+      const q = proj(this.checkpoints[i]);
+      ctx.fillStyle = 'rgba(255,255,255,.5)';
+      ctx.beginPath();
+      ctx.arc(q.x, q.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    const cur = proj(this.checkpoints[this.checkpointIndex]);
     ctx.fillStyle = '#1f4b9b';
     ctx.beginPath();
-    ctx.arc(this.pos.c * cell + cell / 2, this.pos.r * cell + cell / 2, cell * 0.24, 0, Math.PI * 2);
+    ctx.arc(cur.x, cur.y, 6, 0, Math.PI * 2);
     ctx.fill();
+  }
 
-    const f = this.front();
-    ctx.strokeStyle = '#fff';
-    ctx.beginPath();
-    ctx.moveTo(this.pos.c * cell + cell / 2, this.pos.r * cell + cell / 2);
-    ctx.lineTo(f.c * cell + cell / 2, f.r * cell + cell / 2);
-    ctx.stroke();
+  private material(a: string, b: string, alpha = 1) {
+    const mat = new BABYLON.StandardMaterial(`mat-${Math.random()}`, this.scene);
+    mat.diffuseColor = BABYLON.Color3.FromHexString(a);
+    mat.emissiveColor = BABYLON.Color3.FromHexString(b).scale(0.12);
+    mat.specularColor = new BABYLON.Color3(0.08, 0.08, 0.08);
+    mat.alpha = alpha;
+    return mat;
+  }
+
+  private makeBush(x: number, z: number) {
+    const a = BABYLON.MeshBuilder.CreateSphere('bush-a', { diameter: 0.8 }, this.scene);
+    const b = BABYLON.MeshBuilder.CreateSphere('bush-b', { diameter: 0.7 }, this.scene);
+    a.position.set(x - 0.18, 0.34, z + 0.05);
+    b.position.set(x + 0.12, 0.3, z - 0.1);
+    const mat = this.material('#73bb66', '#54984a');
+    a.material = mat;
+    b.material = mat;
+  }
+
+  private makeFlower(x: number, z: number) {
+    const stem = BABYLON.MeshBuilder.CreateCylinder('flower-stem', { height: 0.22, diameter: 0.03 }, this.scene);
+    stem.position.set(x, 0.12, z);
+    stem.material = this.material('#509f4f', '#3d7d3f');
+    const petal = BABYLON.MeshBuilder.CreateSphere('flower-petal', { diameter: 0.08 }, this.scene);
+    petal.position.set(x, 0.24, z);
+    petal.material = this.material('#ffbbd2', '#f58caf');
+  }
+
+  private makePebble(x: number, z: number) {
+    const pebble = BABYLON.MeshBuilder.CreateSphere('pebble', { diameter: 0.24 }, this.scene);
+    pebble.position.set(x, 0.1, z);
+    pebble.scaling = new BABYLON.Vector3(1.4, 0.65, 1.05);
+    pebble.material = this.material('#b5bac8', '#8c92a0');
+  }
+
+  private makeFence(x: number, z: number, rotY: number) {
+    const postA = BABYLON.MeshBuilder.CreateBox('fence-post', { width: 0.08, height: 0.36, depth: 0.08 }, this.scene);
+    postA.position.set(x - 0.42 * Math.cos(rotY), 0.18, z - 0.42 * Math.sin(rotY));
+    const postB = BABYLON.MeshBuilder.CreateBox('fence-post', { width: 0.08, height: 0.36, depth: 0.08 }, this.scene);
+    postB.position.set(x + 0.42 * Math.cos(rotY), 0.18, z + 0.42 * Math.sin(rotY));
+    const rail1 = BABYLON.MeshBuilder.CreateBox('fence-rail', { width: 0.9, height: 0.06, depth: 0.05 }, this.scene);
+    rail1.position.set(x, 0.22, z);
+    rail1.rotation.y = rotY;
+    const rail2 = BABYLON.MeshBuilder.CreateBox('fence-rail', { width: 0.9, height: 0.06, depth: 0.05 }, this.scene);
+    rail2.position.set(x, 0.3, z);
+    rail2.rotation.y = rotY;
+    const mat = this.material('#a47f5c', '#76583e');
+    postA.material = mat;
+    postB.material = mat;
+    rail1.material = mat;
+    rail2.material = mat;
   }
 }
 
