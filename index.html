@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cross the Valley · Module 3 Bonus</title>
+  <style>
+    :root{--bg:#eef5ff;--panel:#ffffff;--ink:#243056;--sub:#5f6f96;--pri:#4f7cff;--ok:#1dbb88;--bad:#ef5b7e;--shadow:0 10px 28px rgba(35,56,123,.16)}
+    *{box-sizing:border-box} body{margin:0;font-family:Inter,Segoe UI,Arial,sans-serif;background:linear-gradient(150deg,#eff5ff,#e6f0ff);color:var(--ink)}
+    .app{height:100vh;display:grid;grid-template-columns:1.65fr 1fr;gap:12px;padding:12px}
+    .card{background:linear-gradient(180deg,#fff,#f6f9ff);border:1px solid #dce7ff;border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
+    .left{position:relative} #renderCanvas{width:100%;height:100%;display:block}
+    .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;pointer-events:none}
+    .chips{display:flex;gap:6px;flex-wrap:wrap}.chip{background:rgba(255,255,255,.92);border:1px solid #d4e2ff;padding:.38rem .68rem;border-radius:999px;font-weight:700;font-size:.86rem}
+    .mini{position:absolute;left:12px;bottom:12px;width:240px;height:220px;background:rgba(255,255,255,.95);border:1px solid #d4e2ff;border-radius:14px;padding:8px;box-shadow:var(--shadow)}
+    .mini h4{margin:0 0 6px;font-size:.8rem;color:var(--sub)} #miniMap{width:100%;height:calc(100% - 22px);background:#eff4ff;border-radius:10px}
+
+    .right{display:grid;grid-template-rows:auto auto 1fr auto auto;gap:10px;padding:12px}
+    h1{margin:0;font-size:1.2rem} .sub{margin:.2rem 0 0;color:var(--sub);font-size:.9rem}
+    .shape-bank{display:flex;flex-wrap:wrap;gap:8px}
+    .shape{cursor:grab;color:#fff;font-weight:700;padding:.5rem .7rem;border:1px solid rgba(255,255,255,.35);box-shadow:0 6px 14px rgba(41,62,125,.2)}
+    .oval{border-radius:999px;background:linear-gradient(135deg,#44c7ff,#4b7dff)}
+    .rect{border-radius:12px;background:linear-gradient(135deg,#42dcb3,#18b79f)}
+    .diamond{width:48px;height:48px;display:flex;align-items:center;justify-content:center;transform:rotate(45deg);border-radius:8px;background:linear-gradient(135deg,#ffb84d,#ff7a69)}
+    .diamond span{transform:rotate(-45deg);font-size:.72rem}
+
+    #flow{border:2px dashed #bfd0ff;border-radius:14px;background:#f3f7ff;padding:8px;overflow:auto}
+    .node{display:flex;align-items:center;gap:6px;background:#fff;border:1px solid #cfddff;border-radius:12px;padding:7px;margin:6px 0}
+    .node.active{outline:3px solid #ffd166}.node.success{outline:2px solid #6ee7b7}
+    .conn{height:10px;margin:0 18px;border-left:2px solid #b6c8ff}.conn.active{border-color:#ffd166}
+    .node select{border:1px solid #cad9ff;background:#f8fbff;border-radius:8px;padding:.2rem}
+    .drag{cursor:grab;color:#7a94d8;font-weight:700}
+
+    .controls{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+    button{border:none;border-radius:10px;padding:.56rem .5rem;font-weight:700;cursor:pointer;background:#e8efff;color:var(--ink)}
+    .run{background:linear-gradient(135deg,#5aa1ff,#58d4c0);color:#07324a}
+    .status{min-height:55px;border:1px solid #ccdcff;background:#f4f8ff;border-radius:12px;padding:8px;color:#486092;font-weight:600}
+    .status.good{border-color:#93e8cc;background:#e9fff6;color:#0e7b5f}.status.bad{border-color:#ffb1c3;background:#fff1f5;color:#a2334f}
+    @media (max-width:1100px){.app{grid-template-columns:1fr;height:auto;min-height:100vh}.left{min-height:54vh}}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <section class="left card">
+      <canvas id="renderCanvas"></canvas>
+      <div class="hud">
+        <div class="chips">
+          <span class="chip" id="levelLabel">Level 1</span>
+          <span class="chip" id="stepLabel">Step 0</span>
+          <span class="chip" id="invLabel">Wood: 0</span>
+          <span class="chip" id="limitLabel">Blocks Remaining: 0</span>
+          <span class="chip" id="starLabel">⭐ 0/3</span>
+        </div>
+      </div>
+      <div class="mini"><h4>Mini-map Planner</h4><canvas id="miniMap" width="220" height="182"></canvas></div>
+    </section>
+
+    <section class="right card">
+      <div><h1>Cross the Valley</h1><p class="sub">Module 3 Bonus · Build a flowchart algorithm to reach and enter the cabin.</p></div>
+      <div class="shape-bank" id="shapeBank">
+        <div class="shape oval" draggable="true" data-shape="start">Start / End</div>
+        <div class="shape rect" draggable="true" data-shape="process">Process</div>
+        <div class="shape diamond" draggable="true" data-shape="decision"><span>Decision</span></div>
+      </div>
+      <div id="flow"></div>
+      <div class="controls">
+        <button class="run" id="runBtn">▶ Run</button>
+        <button id="stepBtn">Step Through</button>
+        <button id="resetBtn">Reset</button>
+        <button id="clearBtn">Clear</button>
+      </div>
+      <div class="status" id="status">Drag Process/Decision blocks, choose options, then run.</div>
+    </section>
+  </div>
+
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="dist/main.js"></script>
+</body>
+</html>
