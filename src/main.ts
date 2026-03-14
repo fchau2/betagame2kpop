@@ -122,20 +122,25 @@ class CrossTheValley {
 
   private buildScene() {
     const scene = new BABYLON.Scene(this.engine);
-    scene.clearColor = new BABYLON.Color4(0.72, 0.86, 1, 1);
+    scene.clearColor = new BABYLON.Color4(0.62, 0.84, 1, 1);
+    scene.fogMode = BABYLON.Scene.FOGMODE_EXP;
+    scene.fogDensity = 0.012;
+    scene.fogColor = new BABYLON.Color3(0.75, 0.9, 1);
 
     const hemi = new BABYLON.HemisphericLight('hemi', new BABYLON.Vector3(0, 1, 0), scene);
-    hemi.intensity = 0.85;
-    const sun = new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-0.6, -1, -0.2), scene);
-    sun.position = new BABYLON.Vector3(12, 24, -4);
-    sun.intensity = 0.75;
+    hemi.intensity = 0.78;
+    hemi.groundColor = new BABYLON.Color3(0.45, 0.54, 0.33);
 
-    this.camera = new BABYLON.FollowCamera('follow', new BABYLON.Vector3(0, 6, -8), scene);
-    this.camera.radius = 10;
-    this.camera.heightOffset = 4.6;
+    const sun = new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-0.35, -1, -0.18), scene);
+    sun.position = new BABYLON.Vector3(18, 28, -12);
+    sun.intensity = 1.0;
+
+    this.camera = new BABYLON.FollowCamera('follow', new BABYLON.Vector3(0, 12, -10), scene);
+    this.camera.radius = 16;
+    this.camera.heightOffset = 10;
     this.camera.rotationOffset = 180;
-    this.camera.cameraAcceleration = 0.06;
-    this.camera.maxCameraSpeed = 12;
+    this.camera.cameraAcceleration = 0.05;
+    this.camera.maxCameraSpeed = 14;
 
     return scene;
   }
@@ -217,31 +222,40 @@ class CrossTheValley {
   }
 
   private buildWorld(grid: string[]) {
-    const matGrass = this.material('#7ccf74', '#5ba75a');
-    const matDirt = this.material('#c29663', '#9b6f41');
+    const matGrass = this.material('#7ec96e', '#5ba458');
+    const matPath = this.material('#c69b67', '#9d7547');
+    const matPathEdge = this.material('#b58a5a', '#91683d');
     const matRock = this.material('#8e97a8', '#6a7282');
-    const matWater = this.material('#5ec4ff', '#2d96e6', 0.92);
-    const matHole = this.material('#2d2731', '#1e1821');
+    const matWater = this.material('#69c8ff', '#3ca3ef', 0.94);
+    const matHole = this.material('#3b2e2a', '#1e1816');
 
-    // full terrain backdrop
     const rows = grid.length;
     const cols = grid[0].length;
-    const plane = BABYLON.MeshBuilder.CreateGround('terrain', { width: cols * 2 + 8, height: rows * 2 + 8 }, this.scene);
-    plane.position.set((cols - 1), -0.01, (rows - 1));
-    plane.material = matGrass;
+
+    const terrain = BABYLON.MeshBuilder.CreateGround('terrain', { width: cols * 2 + 16, height: rows * 2 + 16 }, this.scene);
+    terrain.position.set((cols - 1), -0.03, (rows - 1));
+    terrain.material = matGrass;
 
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const t = grid[r][c] as Tile;
         const x = c * 2;
         const z = r * 2;
+        const pathTile = t === '.' || t === 'S' || t === 'C';
 
-        const tile = BABYLON.MeshBuilder.CreateGround(`tile-${r}-${c}`, { width: 1.95, height: 1.95 }, this.scene);
+        const tile = BABYLON.MeshBuilder.CreateGround(`tile-${r}-${c}`, { width: pathTile ? 1.9 : 1.96, height: pathTile ? 1.9 : 1.96 }, this.scene);
         tile.position.set(x, 0, z);
-        tile.material = t === '.' || t === 'S' || t === 'C' ? matDirt : matGrass;
+        tile.material = pathTile ? matPath : matGrass;
 
-        // variation props for adventure feel
-        if (t === '.' && Math.random() > 0.78) this.makeBush(x + (Math.random() - 0.5) * 0.8, z + (Math.random() - 0.5) * 0.8);
+        if (pathTile) {
+          const edge = BABYLON.MeshBuilder.CreateGround(`path-edge-${r}-${c}`, { width: 2.08, height: 2.08 }, this.scene);
+          edge.position.set(x, -0.005, z);
+          edge.material = matPathEdge;
+          edge.visibility = 0.55;
+        }
+
+        if (pathTile && Math.random() > 0.8) this.makeFlower(x + (Math.random() - 0.5) * 0.9, z + (Math.random() - 0.5) * 0.9);
+        if (!pathTile && Math.random() > 0.72) this.makeBush(x + (Math.random() - 0.5) * 0.9, z + (Math.random() - 0.5) * 0.9);
         if (Math.random() > 0.93) this.makePebble(x + (Math.random() - 0.5), z + (Math.random() - 0.5));
 
         if (t === 'R') this.makeRock(r, c, x, z, matRock);
@@ -256,48 +270,120 @@ class CrossTheValley {
         }
         if (t === 'C') {
           this.cabin = { r, c };
-          this.makeCabin(x, z);
+          this.makeCottage(x, z);
         }
       }
     }
+
+    this.scatterCountrysideProps(rows, cols);
   }
 
-  private makeBush(x: number, z: number) {
-    const bush = BABYLON.MeshBuilder.CreateSphere('bush', { diameter: 0.45 }, this.scene);
-    bush.position.set(x, 0.2, z);
-    bush.material = this.material('#62b56b', '#4a8c53');
+  private scatterCountrysideProps(rows: number, cols: number) {
+    const minX = -6;
+    const maxX = cols * 2 + 4;
+    const minZ = -6;
+    const maxZ = rows * 2 + 4;
+
+    for (let i = 0; i < 26; i++) {
+      const x = minX + Math.random() * (maxX - minX);
+      const z = minZ + Math.random() * (maxZ - minZ);
+      if (Math.random() > 0.55) this.makeTree(x, z, 0.82 + Math.random() * 0.45);
+      else this.makeBush(x, z, 0.6 + Math.random() * 0.55);
+      if (Math.random() > 0.7) this.makeFlower(x + (Math.random() - 0.5), z + (Math.random() - 0.5));
+    }
+
+    for (let i = 0; i < 8; i++) {
+      this.makeFence(minX + 2 + i * 2.6, minZ + 1.4, 0);
+      this.makeFence(minX + 2 + i * 2.6, maxZ - 1.2, 0);
+    }
+    for (let i = 0; i < 6; i++) {
+      this.makeFence(minX + 1.1, minZ + 2 + i * 2.5, Math.PI / 2);
+      this.makeFence(maxX - 1.1, minZ + 2 + i * 2.5, Math.PI / 2);
+    }
+
+    for (let i = 0; i < 7; i++) {
+      this.makeWheatPatch(minX + 4 + i * 1.8, maxZ - 3.5 + (Math.random() - 0.5) * 1.2);
+      this.makeWheatPatch(maxX - 5 - i * 1.6, minZ + 3 + (Math.random() - 0.5) * 1.2);
+    }
+  }
+
+  private makeBush(x: number, z: number, scale = 1) {
+    const bush = BABYLON.MeshBuilder.CreateSphere('bush', { diameter: 0.5 * scale }, this.scene);
+    bush.position.set(x, 0.2 * scale, z);
+    bush.scaling = new BABYLON.Vector3(1.2, 0.9, 1);
+    bush.material = this.material('#69b85f', '#4a8d4e');
+  }
+
+  private makeFlower(x: number, z: number) {
+    const stem = BABYLON.MeshBuilder.CreateCylinder('flower-stem', { height: 0.24, diameter: 0.03 }, this.scene);
+    stem.position.set(x, 0.12, z);
+    stem.material = this.material('#4ca652', '#387b3d');
+    const petal = BABYLON.MeshBuilder.CreateSphere('flower', { diameter: 0.08 }, this.scene);
+    petal.position.set(x, 0.23, z);
+    const colors = ['#ff8fc0', '#ffd16d', '#9ed0ff'];
+    petal.material = this.material(colors[Math.floor(Math.random() * colors.length)], '#ffffff');
+  }
+
+  private makeWheatPatch(x: number, z: number) {
+    for (let i = 0; i < 7; i++) {
+      const stalk = BABYLON.MeshBuilder.CreateCylinder('wheat', { height: 0.38 + Math.random() * 0.16, diameter: 0.025 }, this.scene);
+      stalk.position.set(x + (Math.random() - 0.5) * 0.8, 0.2, z + (Math.random() - 0.5) * 0.8);
+      stalk.material = this.material('#e6cf5c', '#c0a93d');
+    }
+  }
+
+  private makeFence(x: number, z: number, rotY: number) {
+    const postA = BABYLON.MeshBuilder.CreateBox('fence-post', { width: 0.08, height: 0.36, depth: 0.08 }, this.scene);
+    postA.position.set(x - 0.4 * Math.cos(rotY), 0.18, z - 0.4 * Math.sin(rotY));
+    const postB = BABYLON.MeshBuilder.CreateBox('fence-post', { width: 0.08, height: 0.36, depth: 0.08 }, this.scene);
+    postB.position.set(x + 0.4 * Math.cos(rotY), 0.18, z + 0.4 * Math.sin(rotY));
+    const rail1 = BABYLON.MeshBuilder.CreateBox('fence-rail', { width: 0.85, height: 0.06, depth: 0.05 }, this.scene);
+    rail1.position.set(x, 0.22, z);
+    rail1.rotation.y = rotY;
+    const rail2 = BABYLON.MeshBuilder.CreateBox('fence-rail', { width: 0.85, height: 0.06, depth: 0.05 }, this.scene);
+    rail2.position.set(x, 0.3, z);
+    rail2.rotation.y = rotY;
+    const mat = this.material('#9b7754', '#6f543b');
+    postA.material = mat; postB.material = mat; rail1.material = mat; rail2.material = mat;
   }
 
   private makePebble(x: number, z: number) {
     const p = BABYLON.MeshBuilder.CreateSphere('pebble', { diameter: 0.22 }, this.scene);
     p.position.set(x, 0.1, z);
+    p.scaling = new BABYLON.Vector3(1.3, 0.8, 1);
     p.material = this.material('#b8bcc9', '#8e93a1');
   }
 
   private makeRock(r: number, c: number, x: number, z: number, mat: any) {
     const rock = BABYLON.MeshBuilder.CreateSphere(`rock-${r}-${c}`, { diameter: 1.35 }, this.scene);
-    rock.position.set(x, 0.7, z);
-    rock.scaling = new BABYLON.Vector3(1.12, 0.9, 0.92);
+    rock.position.set(x, 0.65, z);
+    rock.scaling = new BABYLON.Vector3(1.2, 0.82, 0.95);
     rock.material = mat;
+    const moss = BABYLON.MeshBuilder.CreateSphere(`moss-${r}-${c}`, { diameter: 0.55 }, this.scene);
+    moss.position.set(x + 0.25, 1.0, z - 0.12);
+    moss.material = this.material('#79b865', '#5f954f');
     this.rockMeshes.set(`${r},${c}`, rock);
   }
 
   private makeHole(x: number, z: number, mat: any) {
-    const rim = BABYLON.MeshBuilder.CreateTorus('hole-rim', { diameter: 1.45, thickness: 0.16 }, this.scene);
+    const rim = BABYLON.MeshBuilder.CreateTorus('hole-rim', { diameter: 1.55, thickness: 0.2 }, this.scene);
     rim.position.set(x, 0.06, z);
-    rim.material = this.material('#5d4f3e', '#3c3125');
-    const pit = BABYLON.MeshBuilder.CreateCylinder('hole', { diameter: 1.25, height: 0.34 }, this.scene);
+    rim.material = this.material('#6f5b42', '#4d3a28');
+    const pit = BABYLON.MeshBuilder.CreateCylinder('hole', { diameter: 1.28, height: 0.34 }, this.scene);
     pit.position.set(x, 0.02, z);
     pit.material = mat;
   }
 
-  private makeTree(x: number, z: number) {
-    const trunk = BABYLON.MeshBuilder.CreateCylinder('trunk', { height: 1.15, diameter: 0.33 }, this.scene);
-    trunk.position.set(x, 0.58, z);
+  private makeTree(x: number, z: number, scale = 1) {
+    const trunk = BABYLON.MeshBuilder.CreateCylinder('trunk', { height: 1.2 * scale, diameter: 0.33 * scale }, this.scene);
+    trunk.position.set(x, 0.6 * scale, z);
     trunk.material = this.material('#8b5a2b', '#6e431f');
-    const leaves = BABYLON.MeshBuilder.CreateSphere('leaves', { diameter: 1.15 }, this.scene);
-    leaves.position.set(x, 1.45, z);
-    leaves.material = this.material('#68be59', '#4a9442');
+    const leavesA = BABYLON.MeshBuilder.CreateSphere('leaves-a', { diameter: 1.1 * scale }, this.scene);
+    leavesA.position.set(x, 1.45 * scale, z);
+    leavesA.material = this.material('#66b95d', '#4b9347');
+    const leavesB = BABYLON.MeshBuilder.CreateSphere('leaves-b', { diameter: 0.7 * scale }, this.scene);
+    leavesB.position.set(x + 0.25 * scale, 1.8 * scale, z - 0.08 * scale);
+    leavesB.material = leavesA.material;
   }
 
   private makeWater(x: number, z: number, mat: any) {
@@ -315,18 +401,38 @@ class CrossTheValley {
     ear.material = body.material;
   }
 
-  private makeCabin(x: number, z: number) {
-    const base = BABYLON.MeshBuilder.CreateBox('cabin-base', { width: 1.9, depth: 1.8, height: 1.25 }, this.scene);
-    base.position.set(x, 0.62, z);
-    base.material = this.material('#d8ab7c', '#ae7f4d');
-    const roof = BABYLON.MeshBuilder.CreateCylinder('cabin-roof', { diameterTop: 0, diameterBottom: 2.4, height: 1.25, tessellation: 4 }, this.scene);
-    roof.position.set(x, 1.6, z);
-    roof.rotation.y = Math.PI / 4;
-    roof.material = this.material('#a44334', '#7f2f26');
+  private makeCottage(x: number, z: number) {
+    const base = BABYLON.MeshBuilder.CreateBox('cottage-base', { width: 2.2, depth: 2.0, height: 1.4 }, this.scene);
+    base.position.set(x, 0.7, z);
+    base.material = this.material('#ead8be', '#cfb79a');
 
-    this.cabinDoor = BABYLON.MeshBuilder.CreateBox('cabin-door', { width: 0.45, height: 0.78, depth: 0.07 }, this.scene);
-    this.cabinDoor.position.set(x - 0.35, 0.42, z + 0.92);
+    const timber1 = BABYLON.MeshBuilder.CreateBox('timber1', { width: 2.2, height: 0.08, depth: 0.09 }, this.scene);
+    timber1.position.set(x, 0.95, z + 0.98);
+    timber1.material = this.material('#6a4a31', '#4f3825');
+    const timber2 = BABYLON.MeshBuilder.CreateBox('timber2', { width: 0.09, height: 1.4, depth: 0.09 }, this.scene);
+    timber2.position.set(x - 0.9, 0.7, z + 0.98);
+    timber2.material = timber1.material;
+
+    const roof = BABYLON.MeshBuilder.CreateCylinder('cottage-roof', { diameterTop: 0.12, diameterBottom: 2.8, height: 1.45, tessellation: 4 }, this.scene);
+    roof.position.set(x, 1.85, z);
+    roof.rotation.y = Math.PI / 4;
+    roof.material = this.material('#cf9252', '#b06f39');
+
+    const winL = BABYLON.MeshBuilder.CreateBox('window-l', { width: 0.35, height: 0.35, depth: 0.06 }, this.scene);
+    winL.position.set(x + 0.65, 0.82, z + 0.97);
+    winL.material = this.material('#9fd5ff', '#ffd89c');
+    const winR = BABYLON.MeshBuilder.CreateBox('window-r', { width: 0.35, height: 0.35, depth: 0.06 }, this.scene);
+    winR.position.set(x - 0.65, 0.82, z + 0.97);
+    winR.material = winL.material;
+
+    this.cabinDoor = BABYLON.MeshBuilder.CreateBox('cottage-door', { width: 0.46, height: 0.8, depth: 0.07 }, this.scene);
+    this.cabinDoor.position.set(x - 0.05, 0.4, z + 1.01);
     this.cabinDoor.material = this.material('#6f4a2b', '#4d2f18');
+
+    this.makeBush(x + 1.0, z + 0.7, 0.8);
+    this.makeBush(x - 1.0, z + 0.7, 0.8);
+    this.makeFlower(x + 1.15, z + 1.0);
+    this.makeFlower(x - 1.1, z + 1.05);
   }
 
   private createExplorer() {
