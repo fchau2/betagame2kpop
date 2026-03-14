@@ -1,559 +1,385 @@
 declare const BABYLON: any;
 
-type Dir = 0 | 1 | 2 | 3; // N,E,S,W
-interface LevelData {
-  name: string;
-  grid: string[];
-  optimalBlocks: number;
-  crystals: Array<{ r: number; c: number }>;
-}
-interface RobotState { r: number; c: number; dir: Dir; }
-interface FlowNode {
-  id: string;
-  type: 'start' | 'process' | 'decision' | 'end';
-  action?: 'forward' | 'left' | 'right' | 'jump';
-  condition?: 'wallAhead' | 'holeAhead' | 'exitAhead';
-  trueAction?: 'forward' | 'left' | 'right' | 'jump' | 'none';
-  falseAction?: 'forward' | 'left' | 'right' | 'jump' | 'none';
+type Dir = 0|1|2|3;
+type ProcessAction = 'walk'|'left'|'right'|'pushRock'|'jump'|'chopTree'|'collectWood'|'buildBoat'|'paddleAcross'|'offerSnack'|'enterCabin';
+type DecisionAction = 'rockAhead'|'holeAhead'|'treeAhead'|'streamAhead'|'animalAhead'|'enoughWood'|'exitAhead';
+
+type Tile = '.'|'S'|'C'|'R'|'H'|'T'|'W'|'A';
+
+interface ProcessNode { id:string; type:'process'; action:ProcessAction; }
+interface DecisionNode { id:string; type:'decision'; condition:DecisionAction; onTrue:ProcessAction|'none'; onFalse:ProcessAction|'none'; }
+type FlowNode = ProcessNode|DecisionNode;
+
+interface Level {
+  name:string; instruction:string; limit:number; perfect:number;
+  grid:string[];
+  actions:ProcessAction[];
+  decisions:DecisionAction[];
 }
 
-class FlowMazeGame {
+class CrossTheValley {
   private canvas = document.getElementById('renderCanvas') as HTMLCanvasElement;
-  private miniMapCanvas = document.getElementById('miniMapCanvas') as HTMLCanvasElement;
-  private flowCanvas = document.getElementById('flowCanvas') as HTMLDivElement;
-  private levelLabel = document.getElementById('levelLabel') as HTMLSpanElement;
-  private stepLabel = document.getElementById('stepLabel') as HTMLSpanElement;
-  private starLabel = document.getElementById('starLabel') as HTMLSpanElement;
-  private statusBox = document.getElementById('statusBox') as HTMLDivElement;
+  private miniCanvas = document.getElementById('miniMap') as HTMLCanvasElement;
+  private flow = document.getElementById('flow') as HTMLDivElement;
+  private statusEl = document.getElementById('status') as HTMLDivElement;
+  private levelEl = document.getElementById('levelLabel') as HTMLSpanElement;
+  private stepEl = document.getElementById('stepLabel') as HTMLSpanElement;
+  private invEl = document.getElementById('invLabel') as HTMLSpanElement;
+  private limitEl = document.getElementById('limitLabel') as HTMLSpanElement;
+  private starEl = document.getElementById('starLabel') as HTMLSpanElement;
 
-  private engine: any;
-  private scene: any;
-  private camera: any;
-  private robotMesh: any;
-  private portalMesh: any;
-  private wallMeshes: any[] = [];
-  private crystalMeshes = new Map<string, any>();
+  private engine:any; private scene:any; private camera:any;
+  private player:any; private cabinDoor:any;
+  private nodes:FlowNode[] = [];
+  private runToken = 0; private running = false; private stepIdx = 0;
 
-  private levels: LevelData[] = [
+  private levels:Level[] = [
     {
-      name: 'Level 1 · Sequence Basics',
-      grid: [
-        '#######',
-        '#S...E#',
-        '#.###.#',
-        '#.....#',
-        '#######'
-      ],
-      optimalBlocks: 4,
-      crystals: [{ r: 3, c: 3 }]
+      name:'Level 1 · Basic obstacle reactions',
+      instruction:'Use Rock/Hole decisions and actions to cross, then Enter Cabin.',
+      limit:6, perfect:5,
+      grid:[
+        'GGGGGGGG',
+        'GSPRHPRC',
+        'GGGGGGGG'
+      ].map(r=>r.replace(/G/g,'.').replace(/P/g,'.')),
+      actions:['walk','left','right','pushRock','jump','enterCabin'],
+      decisions:['rockAhead','holeAhead']
     },
     {
-      name: 'Level 2 · Turning Routes',
-      grid: [
-        '########',
-        '#S..#..#',
-        '###.#.##',
-        '#...#E.#',
-        '#.####.#',
-        '#......#',
-        '########'
+      name:'Level 2 · Resources and streams',
+      instruction:'Chop and collect wood, build boat, paddle stream, then Enter Cabin.',
+      limit:8, perfect:7,
+      grid:[
+        '.........',
+        '.S.TW...C',
+        '.........'
       ],
-      optimalBlocks: 7,
-      crystals: [{ r: 5, c: 2 }, { r: 1, c: 6 }]
+      actions:['walk','chopTree','collectWood','buildBoat','paddleAcross','enterCabin'],
+      decisions:['treeAhead','streamAhead','enoughWood']
     },
     {
-      name: 'Level 3 · Decisions + Jumping',
-      grid: [
-        '#########',
-        '#S..O...#',
-        '###.#.#E#',
-        '#...O...#',
-        '#.#####.#',
-        '#.......#',
-        '#########'
+      name:'Level 3 · Multi-step planning',
+      instruction:'Combine resources, animal handling, hole jump, and explicit Enter Cabin.',
+      limit:10, perfect:9,
+      grid:[
+        '...........',
+        '.S.TWAW.H.C',
+        '...........'
       ],
-      optimalBlocks: 9,
-      crystals: [{ r: 5, c: 3 }, { r: 1, c: 6 }, { r: 3, c: 7 }]
+      actions:['walk','chopTree','collectWood','buildBoat','paddleAcross','offerSnack','jump','enterCabin'],
+      decisions:['treeAhead','streamAhead','enoughWood','animalAhead','holeAhead','exitAhead']
     }
   ];
 
-  private levelIndex = 0;
-  private robot: RobotState = { r: 0, c: 0, dir: 1 };
-  private start: RobotState = { r: 0, c: 0, dir: 1 };
-  private exit = { r: 0, c: 0 };
-  private flowNodes: FlowNode[] = [];
-  private running = false;
-  private step = 0;
-  private collected = new Set<string>();
-  private travelPath: Array<{r:number;c:number}> = [];
+  private levelIndex=0;
+  private pos={r:0,c:0,dir:1 as Dir};
+  private start={r:0,c:0,dir:1 as Dir};
+  private cabin={r:0,c:0};
+  private wood=0; private hasBoat=false; private enteredCabin=false;
+  private path:Array<{r:number;c:number}>=[];
+  private tileMap = new Map<string,any>();
 
-  constructor() {
-    this.engine = new BABYLON.Engine(this.canvas, true, { preserveDrawingBuffer: true });
-    this.scene = this.createScene();
-    this.wireUi();
+  constructor(){
+    this.engine = new BABYLON.Engine(this.canvas, true);
+    this.scene = this.setupScene();
+    this.wireUI();
     this.loadLevel(0);
-    this.engine.runRenderLoop(() => this.scene.render());
-    window.addEventListener('resize', () => this.engine.resize());
+    this.engine.runRenderLoop(()=>{this.scene.render(); if (this.cabinDoor) this.cabinDoor.rotation.y += 0.005;});
+    window.addEventListener('resize',()=>this.engine.resize());
   }
 
-  private createScene() {
+  private setupScene(){
     const scene = new BABYLON.Scene(this.engine);
-    scene.clearColor = new BABYLON.Color4(0.03, 0.06, 0.14, 1);
-
-    this.camera = new BABYLON.ArcRotateCamera('cam', Math.PI / 4, 1.15, 24, new BABYLON.Vector3(0, 0, 0), scene);
-    this.camera.attachControl(this.canvas, true);
-    this.camera.lowerRadiusLimit = 13;
-    this.camera.upperRadiusLimit = 35;
-
-    const hemi = new BABYLON.HemisphericLight('hem', new BABYLON.Vector3(0, 1, 0), scene);
-    hemi.intensity = 0.8;
-    const point = new BABYLON.PointLight('p', new BABYLON.Vector3(0, 8, -2), scene);
-    point.intensity = 0.75;
-
-    const glow = new BABYLON.GlowLayer('glow', scene);
-    glow.intensity = 0.8;
-
+    scene.clearColor = new BABYLON.Color4(0.74,0.88,1,1);
+    const light = new BABYLON.HemisphericLight('h', new BABYLON.Vector3(0,1,0), scene); light.intensity=.9;
+    const sun = new BABYLON.DirectionalLight('d', new BABYLON.Vector3(-0.6,-1,-0.4), scene); sun.position = new BABYLON.Vector3(10,22,10); sun.intensity=.6;
+    this.camera = new BABYLON.FollowCamera('fc', new BABYLON.Vector3(0,6,-8), scene);
+    this.camera.radius = 9; this.camera.heightOffset = 4; this.camera.rotationOffset = 180; this.camera.cameraAcceleration=.08; this.camera.maxCameraSpeed=15;
     return scene;
   }
 
-  private loadLevel(index: number) {
-    this.levelIndex = index;
-    this.clearSceneMeshes();
-    const lv = this.levels[index];
-    this.levelLabel.textContent = lv.name;
-    this.step = 0;
-    this.collected.clear();
-    this.travelPath = [];
+  private loadLevel(index:number){
+    this.levelIndex=index; this.runToken++; this.running=false; this.stepIdx=0; this.nodes=[];
+    this.disposeDynamic();
+    const lv=this.levels[index];
+    this.levelEl.textContent=lv.name; this.setStatus(lv.instruction);
+    this.wood=0; this.hasBoat=false; this.enteredCabin=false; this.path=[];
 
-    const floorMat = new BABYLON.StandardMaterial('floorMat', this.scene);
-    floorMat.diffuseColor = new BABYLON.Color3(0.12, 0.21, 0.44);
-    floorMat.emissiveColor = new BABYLON.Color3(0.03, 0.07, 0.14);
+    const grass = this.mat('#7dcf74','#4da258');
+    const dirt = this.mat('#b88954','#8c6036');
+    const rockM = this.mat('#8f95a6','#677086');
+    const waterM = this.mat('#59b6ff','#328fe6',true);
+    const holeM = this.mat('#2e2a2f','#1d1720');
+    const treeM = this.mat('#65b55d','#3f7d39');
 
-    const wallMat = new BABYLON.StandardMaterial('wallMat', this.scene);
-    wallMat.diffuseColor = new BABYLON.Color3(0.22, 0.37, 0.75);
+    const g=lv.grid;
+    for(let r=0;r<g.length;r++)for(let c=0;c<g[0].length;c++){
+      const t = g[r][c] as Tile;
+      const x=c*2,z=r*2;
+      const base=BABYLON.MeshBuilder.CreateGround(`tile-${r}-${c}`,{width:2,height:2},this.scene);
+      base.position.set(x,0,z);
+      base.material = (t==='.'||t==='S'||t==='C')?dirt:grass;
+      this.tileMap.set(`${r},${c}`, base);
 
-    const holeMat = new BABYLON.StandardMaterial('holeMat', this.scene);
-    holeMat.diffuseColor = new BABYLON.Color3(0.02, 0.03, 0.09);
-
-    lv.grid.forEach((row, r) => row.split('').forEach((cell, c) => {
-      const x = c * 2;
-      const z = r * 2;
-      if (cell !== 'O') {
-        const tile = BABYLON.MeshBuilder.CreateGround(`tile-${r}-${c}`, { width: 2, height: 2 }, this.scene);
-        tile.position = new BABYLON.Vector3(x, 0, z);
-        tile.material = floorMat;
-      } else {
-        const ring = BABYLON.MeshBuilder.CreateTorus(`hole-${r}-${c}`, { diameter: 1.8, thickness: 0.2 }, this.scene);
-        ring.position = new BABYLON.Vector3(x, 0.05, z);
-        ring.material = holeMat;
+      if(t==='R'){
+        const rock=BABYLON.MeshBuilder.CreateSphere(`r-${r}-${c}`,{diameter:1.35},this.scene); rock.position.set(x,0.68,z); rock.material=rockM;
+      } else if(t==='H'){
+        const pit=BABYLON.MeshBuilder.CreateCylinder(`h-${r}-${c}`,{diameter:1.4,height:.3,tessellation:20},this.scene); pit.position.set(x,.02,z); pit.material=holeM;
+      } else if(t==='T'){
+        const trunk=BABYLON.MeshBuilder.CreateCylinder(`tr-${r}-${c}`,{height:1.2,diameter:.35},this.scene); trunk.position.set(x,.6,z); trunk.material=this.mat('#8b5a2b','#704120');
+        const crown=BABYLON.MeshBuilder.CreateSphere(`tc-${r}-${c}`,{diameter:1.2},this.scene); crown.position.set(x,1.5,z); crown.material=treeM;
+      } else if(t==='W'){
+        const water=BABYLON.MeshBuilder.CreateGround(`w-${r}-${c}`,{width:2,height:2},this.scene); water.position.set(x,.04,z); water.material=waterM;
+      } else if(t==='A'){
+        const body=BABYLON.MeshBuilder.CreateSphere(`a-${r}-${c}`,{diameter:1.1},this.scene); body.position.set(x,.55,z); body.material=this.mat('#d18f56','#b46f35');
+        const ear=BABYLON.MeshBuilder.CreateSphere(`ae-${r}-${c}`,{diameter:.35},this.scene); ear.position.set(x+.35,.95,z+.2); ear.material=body.material;
+      } else if(t==='S'){
+        this.start={r,c,dir:1}; this.pos={...this.start};
+      } else if(t==='C'){
+        this.cabin={r,c};
+        this.createCabin(x,z);
       }
-
-      if (cell === '#') {
-        const wall = BABYLON.MeshBuilder.CreateBox(`wall-${r}-${c}`, { size: 2, height: 2.4 }, this.scene);
-        wall.position = new BABYLON.Vector3(x, 1.2, z);
-        wall.material = wallMat;
-        this.wallMeshes.push(wall);
-      }
-      if (cell === 'S') {
-        this.start = { r, c, dir: 1 };
-        this.robot = { ...this.start };
-      }
-      if (cell === 'E') this.exit = { r, c };
-    }));
-
-    this.portalMesh = BABYLON.MeshBuilder.CreateTorus('portal', { diameter: 1.4, thickness: 0.25 }, this.scene);
-    this.portalMesh.position = new BABYLON.Vector3(this.exit.c * 2, 1.1, this.exit.r * 2);
-    this.portalMesh.rotation.x = Math.PI / 2;
-    const portalMat = new BABYLON.StandardMaterial('portalMat', this.scene);
-    portalMat.emissiveColor = new BABYLON.Color3(0.1, 0.9, 1);
-    portalMat.diffuseColor = new BABYLON.Color3(0.03, 0.3, 0.5);
-    this.portalMesh.material = portalMat;
-
-    this.robotMesh = this.buildRobot();
-    this.placeRobot();
-    this.spawnCrystals();
-
-    this.camera.target = new BABYLON.Vector3((lv.grid[0].length - 1), 0, (lv.grid.length - 1));
-    this.refreshFlowCanvas();
-    this.updateStatus('Set up your flowchart and run the robot through the maze.');
-    this.drawMiniMap();
-  }
-
-  private buildRobot() {
-    const body = BABYLON.MeshBuilder.CreateBox('rb-body', { width: 1, depth: 1, height: 1.1 }, this.scene);
-    body.position.y = 0.9;
-    const head = BABYLON.MeshBuilder.CreateSphere('rb-head', { diameter: 0.8 }, this.scene);
-    head.position.y = 1.7;
-    const eye = BABYLON.MeshBuilder.CreateSphere('rb-eye', { diameter: 0.15 }, this.scene);
-    eye.position = new BABYLON.Vector3(0.2, 1.78, 0.35);
-    const eye2 = eye.clone('rb-eye2'); eye2.position.x = -0.2;
-    const antenna = BABYLON.MeshBuilder.CreateCylinder('rb-ant', { height: 0.45, diameter: 0.08 }, this.scene);
-    antenna.position.y = 2.2;
-
-    const mat = new BABYLON.StandardMaterial('robotMat', this.scene);
-    mat.diffuseColor = new BABYLON.Color3(0.71, 0.9, 1.0);
-    mat.emissiveColor = new BABYLON.Color3(0.15, 0.2, 0.3);
-    [body, head, antenna, eye, eye2].forEach((m) => m.material = mat);
-
-    const robot = BABYLON.Mesh.MergeMeshes([body, head, eye, eye2, antenna], true, false, undefined, false, true);
-    return robot;
-  }
-
-  private spawnCrystals() {
-    this.crystalMeshes.clear();
-    this.levels[this.levelIndex].crystals.forEach((cr, i) => {
-      const crystal = BABYLON.MeshBuilder.CreatePolyhedron(`crystal-${i}`, { type: 1, size: 0.4 }, this.scene);
-      crystal.position = new BABYLON.Vector3(cr.c * 2, 0.55, cr.r * 2);
-      const mat = new BABYLON.StandardMaterial(`cMat-${i}`, this.scene);
-      mat.emissiveColor = new BABYLON.Color3(0.8, 0.95, 1);
-      mat.diffuseColor = new BABYLON.Color3(0.25, 0.8, 1);
-      crystal.material = mat;
-      this.crystalMeshes.set(`${cr.r},${cr.c}`, crystal);
-    });
-  }
-
-  private clearSceneMeshes() {
-    this.scene.meshes.slice().forEach((m: any) => {
-      if (m.name !== 'cam') m.dispose();
-    });
-    this.wallMeshes = [];
-  }
-
-  private wireUi() {
-    const bank = document.getElementById('shapeBank') as HTMLDivElement;
-    bank.querySelectorAll<HTMLElement>('.shape').forEach((shape) => {
-      shape.addEventListener('dragstart', (e) => e.dataTransfer?.setData('shape', shape.dataset.shape || 'process'));
-    });
-
-    this.flowCanvas.addEventListener('dragover', (e) => e.preventDefault());
-    this.flowCanvas.addEventListener('drop', (e) => {
-      e.preventDefault();
-      const shape = e.dataTransfer?.getData('shape');
-      if (!shape || shape === 'start') return;
-      this.flowNodes.push(this.defaultNode(shape as any));
-      this.refreshFlowCanvas();
-    });
-
-    (document.getElementById('runBtn') as HTMLButtonElement).onclick = () => this.runAll();
-    (document.getElementById('stepBtn') as HTMLButtonElement).onclick = () => this.runSingleStep();
-    (document.getElementById('resetBtn') as HTMLButtonElement).onclick = () => this.resetLevel();
-    (document.getElementById('clearBtn') as HTMLButtonElement).onclick = () => {
-      this.flowNodes = []; this.refreshFlowCanvas(); this.updateStatus('Flowchart cleared. Build a new algorithm.');
-    };
-  }
-
-  private defaultNode(shape: 'process' | 'decision' | 'end'): FlowNode {
-    if (shape === 'process') return { id: crypto.randomUUID(), type: 'process', action: 'forward' };
-    if (shape === 'decision') return { id: crypto.randomUUID(), type: 'decision', condition: 'holeAhead', trueAction: 'jump', falseAction: 'forward' };
-    return { id: crypto.randomUUID(), type: 'end' };
-  }
-
-  private refreshFlowCanvas(activeId = '') {
-    this.flowCanvas.innerHTML = '';
-    const startNode = this.makeNodeElement({ id: 'start', type: 'start' }, activeId);
-    this.flowCanvas.appendChild(startNode);
-    this.flowCanvas.appendChild(this.connector(false));
-
-    this.flowNodes.forEach((node, idx) => {
-      this.flowCanvas.appendChild(this.makeNodeElement(node, activeId));
-      if (idx < this.flowNodes.length - 1) this.flowCanvas.appendChild(this.connector(false));
-    });
-
-    this.flowCanvas.appendChild(this.connector(false));
-    this.flowCanvas.appendChild(this.makeNodeElement({ id: 'end', type: 'end' }, activeId));
-  }
-
-  private connector(active: boolean) {
-    const el = document.createElement('div');
-    el.className = `connector ${active ? 'active' : ''}`;
-    return el;
-  }
-
-  private makeNodeElement(node: FlowNode, activeId: string) {
-    const wrap = document.createElement('div');
-    wrap.className = `node ${activeId === node.id ? 'active' : ''}`;
-    wrap.draggable = node.type === 'process' || node.type === 'decision';
-    wrap.dataset.id = node.id;
-    wrap.addEventListener('dragstart', (e) => e.dataTransfer?.setData('moveNode', node.id));
-    wrap.addEventListener('dragover', (e) => e.preventDefault());
-    wrap.addEventListener('drop', (e) => {
-      e.preventDefault();
-      const moveId = e.dataTransfer?.getData('moveNode');
-      if (!moveId || moveId === node.id) return;
-      const from = this.flowNodes.findIndex(n => n.id === moveId);
-      const to = this.flowNodes.findIndex(n => n.id === node.id);
-      if (from < 0 || to < 0) return;
-      const [picked] = this.flowNodes.splice(from, 1);
-      this.flowNodes.splice(to, 0, picked);
-      this.refreshFlowCanvas();
-    });
-
-    if (node.type === 'start' || node.type === 'end') {
-      wrap.innerHTML = `<span class="shape oval">${node.type === 'start' ? 'START' : 'END'}</span><span class="label">${node.type === 'start' ? 'Entry point' : 'Goal check'}</span>`;
-      return wrap;
     }
 
-    const drag = document.createElement('span');
-    drag.className = 'drag'; drag.textContent = '↕';
-    wrap.appendChild(drag);
+    this.player = this.createPlayer();
+    this.placePlayer(); this.camera.lockedTarget=this.player;
+    this.refreshFlow(); this.updateHUD(); this.drawMini();
+  }
 
-    const shape = document.createElement('span');
-    shape.className = `shape ${node.type === 'process' ? 'rect' : 'diamond'}`;
-    shape.innerHTML = node.type === 'process' ? 'Process' : '<span>Decision</span>';
-    wrap.appendChild(shape);
+  private createCabin(x:number,z:number){
+    const base=BABYLON.MeshBuilder.CreateBox('cabin',{width:1.8,height:1.3,depth:1.8},this.scene); base.position.set(x,.65,z); base.material=this.mat('#d8a46e','#ac733e');
+    const roof=BABYLON.MeshBuilder.CreateCylinder('roof',{diameterTop:0,diameterBottom:2.3,height:1.2,tessellation:4},this.scene); roof.position.set(x,1.7,z); roof.rotation.y=Math.PI/4; roof.material=this.mat('#a44334','#7e2f25');
+    const door=BABYLON.MeshBuilder.CreateBox('door',{width:.45,height:.75,depth:.06},this.scene); door.position.set(x-.35,.4,z+.92); door.material=this.mat('#6f4a2b','#4b2f18');
+    this.cabinDoor=door;
+  }
 
-    if (node.type === 'process') {
-      const s = document.createElement('select');
-      ['forward','left','right','jump'].forEach(v => s.add(new Option(this.actionLabel(v as any), v)));
-      s.value = node.action || 'forward';
-      s.onchange = () => { node.action = s.value as any; };
-      wrap.appendChild(s);
-    } else {
-      const cond = document.createElement('select');
-      [['wallAhead','Wall ahead?'], ['holeAhead','Hole ahead?'], ['exitAhead','Exit ahead?']].forEach(([v,t]) => cond.add(new Option(t,v)));
-      cond.value = node.condition || 'holeAhead';
-      cond.onchange = () => { node.condition = cond.value as any; };
+  private createPlayer(){
+    const body=BABYLON.MeshBuilder.CreateCapsule('pbody',{height:1.2,radius:.35},this.scene); body.position.y=.8; body.material=this.mat('#66c7ff','#3f98d4');
+    const bag=BABYLON.MeshBuilder.CreateBox('bag',{width:.4,height:.45,depth:.2},this.scene); bag.position.set(0,.85,-.28); bag.material=this.mat('#f2c278','#d49f4a');
+    const face=BABYLON.MeshBuilder.CreateSphere('face',{diameter:.16},this.scene); face.position.set(.14,1.05,.28); face.material=this.mat('#fff','#ddd');
+    const root=BABYLON.Mesh.MergeMeshes([body,bag,face], true, false, undefined, false, true);
+    return root;
+  }
 
-      const tSel = document.createElement('select');
-      ['jump','forward','left','right','none'].forEach(v => tSel.add(new Option(`True:${this.actionLabel(v as any)}`, v)));
-      tSel.value = node.trueAction || 'jump';
-      tSel.onchange = () => node.trueAction = tSel.value as any;
+  private mat(c1:string,c2:string,alpha=false){const m=new BABYLON.StandardMaterial('m'+Math.random(),this.scene); m.diffuseColor=BABYLON.Color3.FromHexString(c1); m.emissiveColor=BABYLON.Color3.FromHexString(c2).scale(.08); if(alpha)m.alpha=.9; return m;}
 
-      const fSel = document.createElement('select');
-      ['forward','left','right','jump','none'].forEach(v => fSel.add(new Option(`False:${this.actionLabel(v as any)}`, v)));
-      fSel.value = node.falseAction || 'forward';
-      fSel.onchange = () => node.falseAction = fSel.value as any;
+  private disposeDynamic(){
+    this.scene.meshes.slice().forEach((m:any)=>{ if(!['fc'].includes(m.name)) m.dispose(); });
+    this.tileMap.clear();
+  }
 
-      wrap.append(cond, tSel, fSel);
+  private wireUI(){
+    document.querySelectorAll<HTMLElement>('#shapeBank .shape').forEach(s=>s.addEventListener('dragstart',e=>e.dataTransfer?.setData('shape', s.dataset.shape||'process')));
+    this.flow.addEventListener('dragover',e=>e.preventDefault());
+    this.flow.addEventListener('drop',e=>{e.preventDefault(); const shape=e.dataTransfer?.getData('shape'); if(!shape||shape==='start')return;
+      const lv=this.levels[this.levelIndex];
+      if(this.nodes.length>=lv.limit){ this.setStatus('Algorithm too long. Try solving it with fewer steps.','bad'); return; }
+      if(shape==='process') this.nodes.push({id:crypto.randomUUID(),type:'process',action:lv.actions[0]} as ProcessNode);
+      if(shape==='decision') this.nodes.push({id:crypto.randomUUID(),type:'decision',condition:lv.decisions[0],onTrue:lv.actions[0],onFalse:'none'} as DecisionNode);
+      this.refreshFlow(); this.updateHUD();
+    });
+
+    (document.getElementById('runBtn') as HTMLButtonElement).onclick=()=>this.runAll();
+    (document.getElementById('stepBtn') as HTMLButtonElement).onclick=()=>this.stepThrough();
+    (document.getElementById('resetBtn') as HTMLButtonElement).onclick=()=>this.reset();
+    (document.getElementById('clearBtn') as HTMLButtonElement).onclick=()=>{this.nodes=[];this.refreshFlow();this.updateHUD();this.setStatus('Flowchart cleared.');};
+  }
+
+  private refreshFlow(active=''){
+    const lv=this.levels[this.levelIndex]; this.flow.innerHTML='';
+    this.flow.append(this.makeFixed('START','start',active==='start')); this.flow.append(this.conn());
+    this.nodes.forEach((n,i)=>{ this.flow.append(this.makeNode(n,active===n.id,lv)); if(i<this.nodes.length-1)this.flow.append(this.conn()); });
+    this.flow.append(this.conn()); this.flow.append(this.makeFixed('END','end',active==='end'));
+  }
+  private makeFixed(txt:string,id:string,active:boolean){const d=document.createElement('div');d.className=`node ${active?'active':''}`;d.innerHTML=`<span class="shape oval">${txt}</span>`;d.dataset.id=id;return d;}
+  private conn(active=false){const d=document.createElement('div');d.className=`conn ${active?'active':''}`;return d;}
+
+  private makeNode(n:FlowNode,active:boolean,lv:Level){
+    const d=document.createElement('div'); d.className=`node ${active?'active':''}`; d.draggable=true; d.dataset.id=n.id;
+    d.addEventListener('dragstart',e=>e.dataTransfer?.setData('move',n.id));
+    d.addEventListener('dragover',e=>e.preventDefault());
+    d.addEventListener('drop',e=>{e.preventDefault();const mid=e.dataTransfer?.getData('move');if(!mid||mid===n.id)return;const from=this.nodes.findIndex(x=>x.id===mid),to=this.nodes.findIndex(x=>x.id===n.id);if(from<0||to<0)return;const [p]=this.nodes.splice(from,1);this.nodes.splice(to,0,p);this.refreshFlow();});
+
+    const drag=document.createElement('span');drag.className='drag';drag.textContent='↕';d.append(drag);
+    const shape=document.createElement('span');shape.className=`shape ${n.type==='process'?'rect':'diamond'}`;shape.innerHTML=n.type==='process'?'Process':'<span>Decision</span>';d.append(shape);
+
+    if(n.type==='process'){
+      const s=document.createElement('select'); lv.actions.forEach(a=>s.add(new Option(this.actionLabel(a),a))); s.value=n.action; s.onchange=()=>n.action=s.value as ProcessAction; d.append(s);
+    } else if(n.type==='decision'){
+      const c=document.createElement('select'); lv.decisions.forEach(v=>c.add(new Option(this.decisionLabel(v),v))); c.value=n.condition; c.onchange=()=>n.condition=c.value as DecisionAction;
+      const t=document.createElement('select'); ['none',...lv.actions].forEach(a=>t.add(new Option(`True: ${a==='none'?'Do Nothing':this.actionLabel(a as ProcessAction)}`,a))); t.value=n.onTrue; t.onchange=()=>n.onTrue=t.value as any;
+      const f=document.createElement('select'); ['none',...lv.actions].forEach(a=>f.add(new Option(`False: ${a==='none'?'Do Nothing':this.actionLabel(a as ProcessAction)}`,a))); f.value=n.onFalse; f.onchange=()=>n.onFalse=f.value as any;
+      d.append(c,t,f);
     }
 
-    const del = document.createElement('button');
-    del.textContent = '✕';
-    del.onclick = () => {
-      this.flowNodes = this.flowNodes.filter((n) => n.id !== node.id);
-      this.refreshFlowCanvas();
-    };
-    wrap.appendChild(del);
-    return wrap;
+    const del=document.createElement('button');del.textContent='✕';del.onclick=()=>{this.nodes=this.nodes.filter(x=>x.id!==n.id);this.refreshFlow();this.updateHUD();};d.append(del);
+    return d;
   }
 
-  private actionLabel(action: 'forward'|'left'|'right'|'jump'|'none') {
-    return ({ forward: 'Move Forward', left: 'Turn Left', right: 'Turn Right', jump: 'Jump Forward', none: 'Do Nothing' } as any)[action];
+  private actionLabel(a:ProcessAction){return({walk:'Walk Forward',left:'Turn Left',right:'Turn Right',pushRock:'Push Rock',jump:'Jump',chopTree:'Chop Tree',collectWood:'Collect Wood',buildBoat:'Build Boat',paddleAcross:'Paddle Across',offerSnack:'Offer Snack',enterCabin:'Enter Cabin'} as Record<ProcessAction,string>)[a];}
+  private decisionLabel(d:DecisionAction){return({rockAhead:'Rock ahead?',holeAhead:'Hole ahead?',treeAhead:'Tree ahead?',streamAhead:'Stream ahead?',animalAhead:'Animal ahead?',enoughWood:'Enough wood?',exitAhead:'Exit ahead?'} as Record<DecisionAction,string>)[d];}
+
+  private front(){const delta=[[-1,0],[0,1],[1,0],[0,-1]][this.pos.dir]; return {r:this.pos.r+delta[0],c:this.pos.c+delta[1]};}
+  private cell(r:number,c:number):Tile{const g=this.levels[this.levelIndex].grid; if(r<0||c<0||r>=g.length||c>=g[0].length)return 'R'; return g[r][c] as Tile;}
+  private setCell(r:number,c:number,val:Tile){const g=this.levels[this.levelIndex].grid.map(x=>x.split('')); g[r][c]=val; this.levels[this.levelIndex].grid=g.map(x=>x.join(''));}
+
+  private async runAll(){
+    if(this.running)return; if(this.nodes.length>this.levels[this.levelIndex].limit) return this.setStatus('Algorithm too long. Try solving it with fewer steps.','bad');
+    this.running=true; const token=++this.runToken;
+    for(let i=this.stepIdx;i<this.nodes.length;i++){
+      if(token!==this.runToken)break;
+      const ok=await this.execNode(this.nodes[i],i+1,token); if(!ok)break; this.stepIdx=i+1;
+    }
+    this.running=false;
   }
 
-  private frontCell(state = this.robot) {
-    const delta = [[-1,0],[0,1],[1,0],[0,-1]][state.dir];
-    return { r: state.r + delta[0], c: state.c + delta[1] };
+  private async stepThrough(){ if(this.running)return; const node=this.nodes[this.stepIdx]; if(!node)return this.setStatus('No more blocks.'); this.running=true; const token=++this.runToken; const ok=await this.execNode(node,this.stepIdx+1,token); if(ok)this.stepIdx++; this.running=false; }
+
+  private async execNode(node:FlowNode,step:number,token:number){
+    this.stepEl.textContent=`Step ${step}`; this.refreshFlow(node.id);
+    if(node.type==='process'){ if(!(await this.doAction(node.action,step,token))) return false; }
+    if(node.type==='decision'){
+      const yes=this.checkDecision(node.condition);
+      this.setStatus(`${this.decisionLabel(node.condition)} ${yes?'Yes':'No'}.`);
+      const action = yes ? node.onTrue : node.onFalse;
+      if(action!=='none'){ if(!(await this.doAction(action as ProcessAction,step,token))) return false; }
+    }
+    this.validateBounds();
+    return true;
   }
 
-  private getCell(r:number,c:number) {
-    const grid = this.levels[this.levelIndex].grid;
-    if (r < 0 || c < 0 || r >= grid.length || c >= grid[0].length) return '#';
-    return grid[r][c];
-  }
-
-  private evaluate(cond: FlowNode['condition']) {
-    const f = this.frontCell();
-    const cell = this.getCell(f.r, f.c);
-    if (cond === 'wallAhead') return cell === '#';
-    if (cond === 'holeAhead') return cell === 'O';
-    if (cond === 'exitAhead') return cell === 'E';
+  private checkDecision(d:DecisionAction){
+    const f=this.front(); const ahead=this.cell(f.r,f.c);
+    if(d==='rockAhead') return ahead==='R';
+    if(d==='holeAhead') return ahead==='H';
+    if(d==='treeAhead') return ahead==='T';
+    if(d==='streamAhead') return ahead==='W';
+    if(d==='animalAhead') return ahead==='A';
+    if(d==='enoughWood') return this.wood>0;
+    if(d==='exitAhead') return ahead==='C';
     return false;
   }
 
-  private async runAll() {
-    if (this.running) return;
-    this.running = true;
-    for (let i = 0; i < this.flowNodes.length; i++) {
-      const ok = await this.executeNode(this.flowNodes[i], i + 1);
-      if (!ok) break;
-      if (this.checkSuccess()) break;
-      await this.delay(250);
-    }
-    this.running = false;
-  }
-
-  private async runSingleStep() {
-    if (this.running) return;
-    const node = this.flowNodes[this.step];
-    if (!node) return this.updateStatus('No more blocks. Add blocks or press Reset.', 'bad');
-    this.running = true;
-    const ok = await this.executeNode(node, this.step + 1);
-    if (ok) this.step += 1;
-    this.running = false;
-  }
-
-  private async executeNode(node: FlowNode, step: number) {
-    this.stepLabel.textContent = `Step ${step}`;
-    this.refreshFlowCanvas(node.id);
-
-    if (node.type === 'process') {
-      const result = await this.performAction(node.action || 'forward', step);
-      if (!result) return false;
+  private async doAction(a:ProcessAction,step:number,token:number){
+    if(token!==this.runToken) return false;
+    if(a==='left'||a==='right'){
+      this.pos.dir=((this.pos.dir+(a==='right'?1:3))%4) as Dir;
+      await this.anim(this.player,'rotation.y',this.player.rotation.y,this.pos.dir*Math.PI/2,12); this.drawMini(); return true;
     }
 
-    if (node.type === 'decision') {
-      const branch = this.evaluate(node.condition);
-      const chosen = branch ? (node.trueAction || 'jump') : (node.falseAction || 'forward');
-      this.updateStatus(`Decision (${node.condition}) was ${branch ? 'TRUE' : 'FALSE'} → ${this.actionLabel(chosen)}`);
-      if (chosen !== 'none') {
-        const result = await this.performAction(chosen as any, step);
-        if (!result) return false;
+    if(a==='enterCabin'){
+      if(this.pos.r===this.cabin.r && this.pos.c===this.cabin.c){
+        this.enteredCabin=true; await this.anim(this.cabinDoor,'rotation.y',this.cabinDoor.rotation.y,-1.3,14);
+        return this.win();
       }
+      return this.fail(`Algorithm failed: Enter Cabin used at wrong place (Step ${step}).`);
     }
 
-    if (this.checkSuccess()) return true;
-    return true;
-  }
-
-  private async performAction(action: 'forward'|'left'|'right'|'jump', step: number) {
-    if (action === 'left' || action === 'right') {
-      this.robot.dir = ((this.robot.dir + (action === 'right' ? 1 : 3)) % 4) as Dir;
-      await BABYLON.Animation.CreateAndStartAnimation('turn', this.robotMesh, 'rotation.y', 30, 12, this.robotMesh.rotation.y, this.robot.dir * (Math.PI/2), 0);
-      this.placeRobot();
-      this.updateStatus(`${this.actionLabel(action)} executed.`);
-      this.drawMiniMap();
+    const f=this.front(); const ahead=this.cell(f.r,f.c);
+    if(a==='walk'){
+      if(ahead==='R') return this.fail(`Algorithm failed: You hit a rock at Step ${step}.`);
+      if(ahead==='H') return this.fail(`Algorithm failed: You fell into a hole at Step ${step}.`);
+      if(ahead==='T') return this.fail(`Algorithm failed: A tree blocks the way at Step ${step}.`);
+      if(ahead==='W') return this.fail(`Algorithm failed: You stepped into a stream at Step ${step}.`);
+      if(ahead==='A') return this.fail(`Algorithm failed: Animal blocks the path at Step ${step}.`);
+      await this.moveTo(f.r,f.c,token);
+      if(f.r===this.cabin.r&&f.c===this.cabin.c&&!this.enteredCabin) this.setStatus('Cabin reached, but the algorithm is incomplete. Add Enter Cabin.','bad');
       return true;
     }
 
-    const f = this.frontCell();
-    const cell = this.getCell(f.r, f.c);
-    if (action === 'forward') {
-      if (cell === '#') return this.fail(`Algorithm failed: Robot hit a wall at Step ${step}.`);
-      if (cell === 'O') return this.fail(`Algorithm failed: Robot fell into a hole at Step ${step}.`, true);
-      await this.walkTo(f.r, f.c);
-      return true;
+    if(a==='pushRock'){
+      if(ahead!=='R') return this.fail(`Algorithm failed: No rock to push at Step ${step}.`);
+      this.setCell(f.r,f.c,'.'); await this.moveTo(f.r,f.c,token); this.setStatus('Rock pushed aside!'); return true;
     }
-
-    if (action === 'jump') {
-      if (cell === '#') return this.fail(`Algorithm failed: Jump collided with a wall at Step ${step}.`);
-      await this.jumpTo(f.r, f.c);
-      return true;
+    if(a==='jump'){
+      if(ahead!=='H') return this.fail(`Algorithm failed: Jump only works over a hole (Step ${step}).`);
+      this.setCell(f.r,f.c,'.'); await this.moveTo(f.r,f.c,token,true); return true;
+    }
+    if(a==='chopTree'){
+      if(ahead!=='T') return this.fail(`Algorithm failed: No tree ahead to chop (Step ${step}).`);
+      this.setCell(f.r,f.c,'.'); this.setStatus('Chop! Tree is down.'); return true;
+    }
+    if(a==='collectWood'){
+      if(ahead!=='.'&&ahead!=='W') return this.fail(`Algorithm failed: No wood bundle to collect (Step ${step}).`);
+      this.wood++; this.updateHUD(); this.setStatus('Collected wood.'); return true;
+    }
+    if(a==='buildBoat'){
+      if(this.wood<=0) return this.fail('Not enough wood to build a boat. Tiny raft failed!',true);
+      this.hasBoat=true; this.wood--; this.updateHUD(); this.setStatus('Boat built from wood.'); return true;
+    }
+    if(a==='paddleAcross'){
+      if(ahead!=='W') return this.fail(`Algorithm failed: No stream ahead to paddle across (Step ${step}).`);
+      if(!this.hasBoat) return this.fail('Algorithm failed: Build Boat before paddling.');
+      this.hasBoat=false; await this.moveTo(f.r,f.c,token,true); this.setStatus('Splish! You paddled across.'); return true;
+    }
+    if(a==='offerSnack'){
+      if(ahead!=='A') return this.fail(`Algorithm failed: No animal ahead for snack (Step ${step}).`);
+      this.setCell(f.r,f.c,'.'); this.setStatus('The animal happily moved aside 🐾'); return true;
     }
 
     return true;
   }
 
-  private async walkTo(r:number,c:number) {
-    const from = this.robotMesh.position.clone();
-    const to = new BABYLON.Vector3(c * 2, 0.9, r * 2);
-    this.robot = { ...this.robot, r, c };
-    this.travelPath.push({ r, c });
-    await BABYLON.Animation.CreateAndStartAnimation('walk', this.robotMesh, 'position', 30, 16, from, to, 0);
-    this.onRobotMoved();
-  }
-
-  private async jumpTo(r:number,c:number) {
-    const start = this.robotMesh.position.clone();
-    const end = new BABYLON.Vector3(c * 2, 0.9, r * 2);
-    this.robot = { ...this.robot, r, c };
-    this.travelPath.push({ r, c });
-    await BABYLON.Animation.CreateAndStartAnimation('jump', this.robotMesh, 'position', 30, 18, start, end, 0);
-    this.onRobotMoved();
-  }
-
-  private onRobotMoved() {
-    this.placeRobot();
-    const key = `${this.robot.r},${this.robot.c}`;
-    if (this.crystalMeshes.has(key) && !this.collected.has(key)) {
-      this.collected.add(key);
-      this.crystalMeshes.get(key).dispose();
-      this.starLabel.textContent = `⭐ ${this.computeStars()}/3`;
+  private async moveTo(r:number,c:number,token:number,arc=false){
+    const from=this.player.position.clone(); const to=new BABYLON.Vector3(c*2,.8,r*2); this.pos.r=r; this.pos.c=c; this.path.push({r,c});
+    if(arc){
+      await this.anim(this.player,'position.y',.8,1.4,8); if(token!==this.runToken)return; await this.anim(this.player,'position.y',1.4,.8,8);
     }
-    this.drawMiniMap();
+    await this.anim(this.player,'position',from,to,14); this.drawMini(); this.validateBounds();
   }
 
-  private computeStars() {
-    let stars = 0;
-    if (this.robot.r === this.exit.r && this.robot.c === this.exit.c) stars++;
-    if (this.flowNodes.length <= this.levels[this.levelIndex].optimalBlocks) stars++;
-    if (this.collected.size === this.levels[this.levelIndex].crystals.length) stars++;
-    return stars;
-  }
+  private anim(target:any, prop:string, from:any, to:any, frames:number){ return BABYLON.Animation.CreateAndStartAnimation('a'+Math.random(),target,prop,30,frames,from,to,0); }
 
-  private checkSuccess() {
-    if (this.robot.r !== this.exit.r || this.robot.c !== this.exit.c) return false;
-    this.portalMesh.scaling = new BABYLON.Vector3(1.6, 1.6, 1.6);
-    this.flowCanvas.querySelectorAll('.node').forEach((n) => n.classList.add('success'));
-    const stars = this.computeStars();
-    this.starLabel.textContent = `⭐ ${stars}/3`;
-    this.updateStatus(`Escape successful! You earned ${stars} star${stars > 1 ? 's' : ''}.`, 'good');
-    if (this.levelIndex < this.levels.length - 1) {
-      setTimeout(() => this.loadLevel(this.levelIndex + 1), 1400);
+  private placePlayer(){this.player.position = new BABYLON.Vector3(this.pos.c*2,.8,this.pos.r*2); this.player.rotation = new BABYLON.Vector3(0,this.pos.dir*Math.PI/2,0);}
+
+  private validateBounds(){
+    const g=this.levels[this.levelIndex].grid; if(this.pos.r<0||this.pos.c<0||this.pos.r>=g.length||this.pos.c>=g[0].length){
+      this.setStatus('Safety reset: character left valid bounds. Snapped back to spawn.','bad'); this.reset();
     }
+  }
+
+  private reset(){
+    this.runToken++; this.running=false; this.stepIdx=0; this.wood=0; this.hasBoat=false; this.enteredCabin=false;
+    this.loadLevel(this.levelIndex); // full state rebuild, safe for repeated reset
+    this.setStatus('Level reset. Debug and try again.');
+  }
+
+  private win(){
+    const stars=this.computeStars(); this.starEl.textContent=`⭐ ${stars}/3`; this.flow.querySelectorAll('.node').forEach(n=>n.classList.add('success'));
+    this.setStatus(`Success! Cabin entered. You earned ${stars} star${stars>1?'s':''}.`,'good');
+    if(this.levelIndex<this.levels.length-1) setTimeout(()=>this.loadLevel(this.levelIndex+1),1500);
     return true;
   }
 
-  private fail(message: string, hole = false) {
-    if (hole) {
-      this.robotMesh.position.y = 0.1;
-      this.robotMesh.scaling.y = 0.7;
-    }
-    this.updateStatus(message, 'bad');
-    this.running = false;
-    return false;
+  private computeStars(){
+    let s=0; if(this.enteredCabin)s++; if(this.nodes.length<=this.levels[this.levelIndex].limit)s++; if(this.nodes.length<=this.levels[this.levelIndex].perfect)s++; return s;
   }
 
-  private resetLevel() {
-    this.robot = { ...this.start };
-    this.placeRobot();
-    this.step = 0;
-    this.collected.clear();
-    this.starLabel.textContent = '⭐ 0/3';
-    this.spawnCrystals();
-    this.travelPath = [];
-    this.refreshFlowCanvas();
-    this.drawMiniMap();
-    this.updateStatus('Level reset. Adjust the algorithm and try again.');
+  private setStatus(msg:string,type:''|'good'|'bad'=''){this.statusEl.className=`status ${type}`.trim(); this.statusEl.textContent=msg;}
+
+  private updateHUD(){
+    const lv=this.levels[this.levelIndex];
+    this.invEl.textContent=`Wood: ${this.wood}`;
+    this.limitEl.textContent=`Blocks Remaining: ${Math.max(0,lv.limit-this.nodes.length)}`;
+    this.starEl.textContent=`⭐ ${this.enteredCabin?this.computeStars():0}/3`;
   }
 
-  private placeRobot() {
-    this.robotMesh.position = new BABYLON.Vector3(this.robot.c * 2, 0.9, this.robot.r * 2);
-    this.robotMesh.rotation = new BABYLON.Vector3(0, this.robot.dir * (Math.PI / 2), 0);
+  private fail(msg:string,funny=false){
+    if(funny){ this.player.scaling.y=.6; }
+    this.setStatus(msg,'bad'); this.running=false; this.runToken++; this.stepIdx=0; return false;
   }
 
-  private drawMiniMap() {
-    const ctx = this.miniMapCanvas.getContext('2d')!;
-    const lv = this.levels[this.levelIndex];
-    const rows = lv.grid.length;
-    const cols = lv.grid[0].length;
-    ctx.clearRect(0, 0, this.miniMapCanvas.width, this.miniMapCanvas.height);
-    const cell = Math.min(this.miniMapCanvas.width / cols, this.miniMapCanvas.height / rows);
-
-    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
-      const x = c * cell, y = r * cell;
-      const ch = lv.grid[r][c];
-      ctx.fillStyle = ch === '#' ? '#4664a8' : ch === 'O' ? '#060d21' : '#16305a';
-      ctx.fillRect(x + 1, y + 1, cell - 2, cell - 2);
-      if (ch === 'E') { ctx.fillStyle = '#43ffd5'; ctx.fillRect(x + cell * .25, y + cell * .25, cell * .5, cell * .5); }
-    }
-
-    this.travelPath.forEach((p) => {
-      ctx.fillStyle = 'rgba(255, 209, 102, .6)';
-      ctx.fillRect(p.c * cell + cell * .33, p.r * cell + cell * .33, cell * .34, cell * .34);
-    });
-
-    ctx.fillStyle = '#79f3ff';
-    ctx.beginPath();
-    ctx.arc(this.robot.c * cell + cell / 2, this.robot.r * cell + cell / 2, cell * .27, 0, Math.PI * 2);
-    ctx.fill();
-
-    const fr = this.frontCell();
-    ctx.strokeStyle = '#b8e7ff';
-    ctx.beginPath();
-    ctx.moveTo(this.robot.c * cell + cell / 2, this.robot.r * cell + cell / 2);
-    ctx.lineTo(fr.c * cell + cell / 2, fr.r * cell + cell / 2);
-    ctx.stroke();
-  }
-
-  private updateStatus(text: string, type: '' | 'good' | 'bad' = '') {
-    this.statusBox.className = `status ${type}`.trim();
-    this.statusBox.textContent = text;
-  }
-
-  private delay(ms: number) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  private drawMini(){
+    const ctx=this.miniCanvas.getContext('2d')!; const g=this.levels[this.levelIndex].grid; const rows=g.length, cols=g[0].length;
+    ctx.clearRect(0,0,this.miniCanvas.width,this.miniCanvas.height);
+    const cell=Math.min(this.miniCanvas.width/cols,this.miniCanvas.height/rows);
+    const col:Record<string,string>={'.':'#c79a63','S':'#5ec8ff','C':'#ffb66b','R':'#848c9f','H':'#34303a','T':'#4ca84a','W':'#64c5ff','A':'#d89055'};
+    for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){ctx.fillStyle=col[g[r][c]];ctx.fillRect(c*cell+1,r*cell+1,cell-2,cell-2)}
+    this.path.forEach(p=>{ctx.fillStyle='rgba(255,255,255,.5)';ctx.fillRect(p.c*cell+cell*.3,p.r*cell+cell*.3,cell*.4,cell*.4)});
+    ctx.fillStyle='#1f4b9b';ctx.beginPath();ctx.arc(this.pos.c*cell+cell/2,this.pos.r*cell+cell/2,cell*.24,0,Math.PI*2);ctx.fill();
+    const f=this.front();ctx.strokeStyle='#fff';ctx.beginPath();ctx.moveTo(this.pos.c*cell+cell/2,this.pos.r*cell+cell/2);ctx.lineTo(f.c*cell+cell/2,f.r*cell+cell/2);ctx.stroke();
   }
 }
 
-new FlowMazeGame();
+new CrossTheValley();
