@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FlowMaze: Escape Protocol</title>
+  <style>
+    :root {
+      --bg: #0a1022;
+      --panel: linear-gradient(160deg, rgba(24, 34, 73, 0.95), rgba(12, 20, 47, 0.94));
+      --ink: #e7efff;
+      --sub: #9fb5e8;
+      --accent: #57a4ff;
+      --mint: #3fe7cc;
+      --rose: #ff6f91;
+      --glow: 0 0 30px rgba(87, 164, 255, 0.35);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, Segoe UI, system-ui, sans-serif;
+      color: var(--ink);
+      background: radial-gradient(circle at 15% 15%, #192f6a 0%, #101b3d 35%, #060b1d 100%);
+      min-height: 100vh;
+    }
+    .app {
+      display: grid;
+      grid-template-columns: 1.65fr 1fr;
+      gap: 1rem;
+      height: 100vh;
+      padding: 1rem;
+    }
+    .card {
+      border-radius: 20px;
+      background: var(--panel);
+      border: 1px solid rgba(121, 160, 255, 0.35);
+      box-shadow: 0 14px 38px rgba(0,0,0,0.35);
+      overflow: hidden;
+    }
+    .left {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+    #renderCanvas {
+      width: 100%; height: 100%; display: block;
+      background: linear-gradient(#15244f, #0b122d);
+    }
+    .hud {
+      position: absolute; top: 12px; left: 12px; right: 12px;
+      display: flex; justify-content: space-between; align-items: flex-start;
+      pointer-events: none;
+    }
+    .pill {
+      background: rgba(5, 12, 34, 0.72);
+      border: 1px solid rgba(125, 174, 255, 0.45);
+      border-radius: 999px;
+      padding: .45rem .8rem; font-weight: 700; color: #dce9ff;
+      margin-right: .4rem;
+    }
+    .mini-map {
+      position: absolute; left: 14px; bottom: 14px; width: 220px; height: 220px;
+      background: rgba(6, 11, 31, .78); border-radius: 16px;
+      border: 1px solid rgba(107, 167, 255, .45);
+      box-shadow: var(--glow);
+      padding: .45rem;
+    }
+    #miniMapCanvas { width: 100%; height: calc(100% - 24px); border-radius: 10px; background: #0a1331; }
+    .mini-map h4 { margin: 0 0 .35rem 0; font-size: .8rem; color: #bdd3ff; }
+
+    .right { display: grid; grid-template-rows: auto 1fr auto auto; gap: .75rem; padding: .9rem; }
+    .title h1 { margin: 0; font-size: 1.25rem; }
+    .title p { margin: .3rem 0 0; color: var(--sub); font-size: .92rem; }
+
+    .shape-bank { display: flex; gap: .45rem; flex-wrap: wrap; }
+    .shape {
+      user-select: none; cursor: grab; font-weight: 700; letter-spacing: .2px;
+      padding: .55rem .72rem; border: 1px solid rgba(255,255,255,.25);
+      box-shadow: 0 6px 16px rgba(0,0,0,.24);
+      color: #fff;
+    }
+    .oval { border-radius: 999px; background: linear-gradient(130deg, #2cc4ff, #5293ff); }
+    .rect { border-radius: 10px; background: linear-gradient(130deg, #4fe7cf, #1db7b2); }
+    .diamond { transform: rotate(45deg); border-radius: 8px; width: 48px; height: 48px; display:flex; align-items:center; justify-content:center; background: linear-gradient(130deg, #ff9d63, #ff6d86); }
+    .diamond span { transform: rotate(-45deg); font-size: .72rem; }
+
+    #flowCanvas {
+      border: 2px dashed rgba(117, 169, 255, 0.45);
+      border-radius: 16px;
+      background: rgba(9, 16, 41, .72);
+      padding: .65rem;
+      overflow: auto;
+      min-height: 260px;
+    }
+    .node {
+      display:flex; align-items:center; gap:.45rem; margin:.45rem 0; padding:.55rem; border-radius:12px;
+      background: rgba(26,40,88,.9); border:1px solid rgba(110,164,255,.35);
+      animation: fadeIn .2s ease;
+    }
+    .node.active { outline: 3px solid #ffd166; box-shadow: 0 0 20px rgba(255,209,102,.25); }
+    .node.success { outline: 2px solid #4cffb6; }
+    .node .label { font-weight:700; font-size:.9rem; }
+    .node select { background:#0f1b45; color:#ddedff; border:1px solid #3d66b4; border-radius:8px; padding:.22rem; }
+    .node .drag { cursor: grab; color:#8fc2ff; font-weight:700; }
+    .connector { height: 10px; margin: 0.05rem 1.2rem; border-left: 2px solid rgba(129, 178, 255, .5); }
+    .connector.active { border-color: #ffd166; }
+
+    .controls { display: grid; grid-template-columns: repeat(4, 1fr); gap: .45rem; }
+    button {
+      border: none; border-radius: 11px; padding: .55rem .5rem; cursor: pointer; font-weight: 700;
+      background: linear-gradient(135deg, #293d79, #3752a0); color: #e8f2ff;
+    }
+    button:hover { filter: brightness(1.1); }
+    .run { background: linear-gradient(135deg, #3fe7cc, #3b9eff); color:#05223a; }
+
+    .status {
+      min-height: 52px; border-radius: 12px; background: rgba(14, 24, 58, .88);
+      border: 1px solid rgba(100, 155, 255, .4); padding: .58rem .7rem; color:#c9dcff;
+    }
+    .status.good { border-color: rgba(63, 231, 204,.8); color: #9bffe9; }
+    .status.bad { border-color: rgba(255, 111, 145,.9); color: #ffd2de; }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(5px);} to { opacity:1; transform:none; }}
+    @media (max-width: 1100px) { .app { grid-template-columns: 1fr; height: auto; min-height: 100vh; } .left { min-height: 52vh; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <section class="left card">
+      <canvas id="renderCanvas"></canvas>
+      <div class="hud">
+        <div>
+          <span class="pill" id="levelLabel">Level 1</span>
+          <span class="pill" id="stepLabel">Step 0</span>
+          <span class="pill" id="starLabel">⭐ 0/3</span>
+        </div>
+      </div>
+      <div class="mini-map">
+        <h4>Bird's-eye Mini-map</h4>
+        <canvas id="miniMapCanvas" width="200" height="180"></canvas>
+      </div>
+    </section>
+
+    <section class="right card">
+      <div class="title">
+        <h1>FlowMaze: Escape Protocol</h1>
+        <p>Build a flowchart to guide the robot. Observe → Plan → Run → Debug.</p>
+      </div>
+
+      <div>
+        <div class="shape-bank" id="shapeBank">
+          <div class="shape oval" draggable="true" data-shape="start">Start / End</div>
+          <div class="shape rect" draggable="true" data-shape="process">Process</div>
+          <div class="shape diamond" draggable="true" data-shape="decision"><span>Decision</span></div>
+        </div>
+        <div id="flowCanvas"></div>
+      </div>
+
+      <div class="controls">
+        <button class="run" id="runBtn">▶ Run</button>
+        <button id="stepBtn">Step Through</button>
+        <button id="resetBtn">Reset</button>
+        <button id="clearBtn">Clear Flowchart</button>
+      </div>
+
+      <div class="status" id="statusBox">Drag Process/Decision blocks into the flowchart and set options.</div>
+    </section>
+  </div>
+
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+  <script src="dist/main.js"></script>
+</body>
+</html>
