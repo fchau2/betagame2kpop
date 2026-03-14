@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "target": "ES2019",
+    "module": "none",
+    "outFile": "dist/main.js",
+    "strict": true,
+    "skipLibCheck": true,
+    "lib": ["DOM", "ES2019"]
+  },
+  "include": ["src/main.ts"]
+}
