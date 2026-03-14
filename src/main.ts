@@ -571,7 +571,7 @@ class CrossTheValley {
 
   private actionLabel(a: ProcessAction) {
     return {
-      walk: 'Walk Forward', left: 'Turn Left', right: 'Turn Right', kickRock: 'Kick Rock Aside', jump: 'Jump',
+      walk: 'Walk Forward', left: 'Turn Left', right: 'Turn Right', kickRock: 'KICK ROCK', jump: 'Jump',
       chopTree: 'Chop Tree', collectWood: 'Collect Wood', buildBoat: 'Build Boat', paddleAcross: 'Paddle Across',
       offerSnack: 'Offer Snack', enterCabin: 'Enter Cabin'
     }[a];
@@ -600,6 +600,22 @@ class CrossTheValley {
     rows[r][c] = tile;
     this.levelTemplate = rows.map((r) => r.join(''));
   }
+
+  private isInside(r: number, c: number) {
+    const g = this.levelTemplate;
+    return r >= 0 && c >= 0 && r < g.length && c < g[0].length;
+  }
+
+  private nextTileState() {
+    const f = this.front();
+    if (!this.isInside(f.r, f.c)) return { ok: false as const, reason: 'Cannot move forward — edge of the map.', r: f.r, c: f.c, tile: 'R' as Tile };
+    return { ok: true as const, reason: '', r: f.r, c: f.c, tile: this.cell(f.r, f.c) };
+  }
+
+  private isBlockedForRobot(tile: Tile) {
+    return tile === 'R' || tile === 'T' || tile === 'W' || tile === 'A' || tile === 'H';
+  }
+
 
   private async runAll() {
     if (this.runMode === 'running' || this.runMode === 'stepping') return;
@@ -714,19 +730,21 @@ class CrossTheValley {
         this.onSuccess();
         return { ok: true };
       }
-      if (this.evaluateDecision('exitAhead')) return { ok: false, message: 'The cabin is still ahead — keep going.' };
+      if (this.evaluateDecision('exitAhead')) return { ok: false, message: 'The cabin is still ahead.' };
       return { ok: false, message: 'You tried to enter the cabin too early.' };
     }
 
-    const f = this.front();
-    const ahead = this.cell(f.r, f.c);
+    const next = this.nextTileState();
+    const f = { r: next.r, c: next.c };
+    const ahead = next.tile;
 
     if (action === 'walk') {
-      if (ahead === 'R') return { ok: false, message: 'A big rock blocks the trail. Try Kick Rock Aside first.' };
-      if (ahead === 'H') return { ok: false, message: 'That step would fall into a hole. Try Jump.' };
-      if (ahead === 'T') return { ok: false, message: 'A tree is in the way. Try Chop Tree first.' };
-      if (ahead === 'W') return { ok: false, message: 'That is a stream. Build a boat, then paddle across.' };
-      if (ahead === 'A') return { ok: false, message: 'A forest friend blocks the path. Offer Snack to pass.' };
+      if (!next.ok) return { ok: false, message: next.reason };
+      if (ahead === 'R') return { ok: false, message: 'Blocked by rock. Use KICK ROCK.' };
+      if (ahead === 'H') return { ok: false, message: 'There is a hole ahead. Try Jump.' };
+      if (ahead === 'T') return { ok: false, message: 'A tree blocks the trail. Try Chop Tree first.' };
+      if (ahead === 'W') return { ok: false, message: 'A stream blocks this step. Build a boat, then paddle.' };
+      if (ahead === 'A') return { ok: false, message: 'An animal blocks the path. Offer Snack first.' };
 
       await this.moveTo(f.r, f.c, token, false);
       if (this.pos.r === this.cabin.r && this.pos.c === this.cabin.c && !this.enteredCabin) {
@@ -736,18 +754,23 @@ class CrossTheValley {
     }
 
     if (action === 'kickRock') {
+      if (!next.ok) return { ok: false, message: 'There’s no rock to kick.' };
       if (ahead !== 'R') return { ok: false, message: 'There’s no rock to kick.' };
-      await this.kickRockAside(f.r, f.c, token);
-      this.setCell(f.r, f.c, '.');
+      const kickResult = await this.kickRockAside(f.r, f.c, token);
+      if (!kickResult.ok) return kickResult;
       this.drawMiniMap();
-      this.setStatus('Nice kick! The rock rolled into the grass.');
+      this.setStatus('Rock kicked aside. Path is clear.');
       return { ok: true };
     }
 
     if (action === 'jump') {
-      if (ahead !== 'H') return { ok: false, message: 'Jump is best for crossing holes.' };
-      this.setCell(f.r, f.c, '.');
-      await this.moveTo(f.r, f.c, token, true);
+      if (!next.ok) return { ok: false, message: next.reason };
+      if (ahead !== 'H') return { ok: false, message: 'Jump works only when a hole is directly ahead.' };
+      const landing = this.front({ r: f.r, c: f.c, dir: this.pos.dir });
+      if (!this.isInside(landing.r, landing.c)) return { ok: false, message: 'Cannot jump out of bounds.' };
+      const landingTile = this.cell(landing.r, landing.c);
+      if (this.isBlockedForRobot(landingTile)) return { ok: false, message: 'No safe landing tile beyond the hole.' };
+      await this.moveTo(landing.r, landing.c, token, true);
       return { ok: true };
     }
 
@@ -795,28 +818,41 @@ class CrossTheValley {
   }
 
 
-  private async kickRockAside(r: number, c: number, token: number) {
+  private async kickRockAside(r: number, c: number, token: number): Promise<ExecResult> {
     const key = `${r},${c}`;
     const rock = this.rockMeshes.get(key);
-    // kick motion cue on explorer
+    if (!rock) return { ok: false, message: 'Cannot kick rock right now.' };
+
+    // determine sideways destination (left first, then right)
+    const leftDir = ((this.pos.dir + 3) % 4) as Dir;
+    const rightDir = ((this.pos.dir + 1) % 4) as Dir;
+    const left = this.front({ r, c, dir: leftDir });
+    const right = this.front({ r, c, dir: rightDir });
+
+    let dest = left;
+    if (!(this.isInside(left.r, left.c) && this.cell(left.r, left.c) === '.')) {
+      if (this.isInside(right.r, right.c) && this.cell(right.r, right.c) === '.') dest = right;
+      else return { ok: false, message: 'No valid tile to kick rock into.' };
+    }
+
+    // kick motion cue
     await this.animate(this.player, 'rotation.x', 0, 0.12, 4, token);
     await this.animate(this.player, 'rotation.x', 0.12, 0, 5, token);
 
-    if (rock) {
-      const side = this.pos.dir === 0 || this.pos.dir === 2 ? 1 : -1;
-      const target = rock.position.clone();
-      if (this.pos.dir === 0 || this.pos.dir === 2) target.x += side * 1.5;
-      else target.z += side * 1.5;
+    const target = new BABYLON.Vector3(dest.c * 2, 0.65, dest.r * 2);
+    await this.animate(rock, 'position.y', rock.position.y, rock.position.y + 0.22, 5, token);
+    await this.animate(rock, 'position', rock.position.clone(), target, 10, token);
+    await this.animate(rock, 'rotation.z', 0, (dest.c < c || dest.r < r) ? -1.2 : 1.2, 10, token);
+    await this.animate(rock, 'position.y', rock.position.y + 0.22, 0.65, 6, token);
 
-      await this.animate(rock, 'position.y', rock.position.y, rock.position.y + 0.25, 5, token);
-      await this.animate(rock, 'position', rock.position.clone(), target, 10, token);
-      await this.animate(rock, 'rotation.z', 0, 1.3 * side, 10, token);
-      await this.animate(rock, 'position.y', rock.position.y + 0.25, 0.25, 6, token);
-      rock.dispose();
-      this.rockMeshes.delete(key);
-    }
+    // update grid + rock lookup
+    this.setCell(r, c, '.');
+    this.setCell(dest.r, dest.c, 'R');
+    this.rockMeshes.delete(key);
+    this.rockMeshes.set(`${dest.r},${dest.c}`, rock);
 
     this.spawnDust(this.pos.c * 2, this.pos.r * 2);
+    return { ok: true };
   }
 
   private spawnDust(x: number, z: number) {
