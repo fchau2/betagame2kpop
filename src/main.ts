@@ -5,7 +5,7 @@ type ProcessAction =
   | 'walk'
   | 'left'
   | 'right'
-  | 'pushRock'
+  | 'kickRock'
   | 'jump'
   | 'chopTree'
   | 'collectWood'
@@ -62,6 +62,7 @@ class CrossTheValley {
   private camera: any;
   private player: any;
   private cabinDoor: any;
+  private rockMeshes = new Map<string, any>();
 
   private nodes: FlowNode[] = [];
   private runnerToken = 0;
@@ -87,7 +88,7 @@ class CrossTheValley {
       limit: 6,
       perfect: 5,
       grid: ['........', '.S.R.H.C', '........'],
-      actions: ['walk', 'left', 'right', 'pushRock', 'jump', 'enterCabin'],
+      actions: ['walk', 'left', 'right', 'kickRock', 'jump', 'enterCabin'],
       decisions: ['rockAhead', 'holeAhead']
     },
     {
@@ -212,6 +213,7 @@ class CrossTheValley {
     this.scene.meshes.slice().forEach((m: any) => {
       if (m.name !== 'follow') m.dispose();
     });
+    this.rockMeshes.clear();
   }
 
   private buildWorld(grid: string[]) {
@@ -242,7 +244,7 @@ class CrossTheValley {
         if (t === '.' && Math.random() > 0.78) this.makeBush(x + (Math.random() - 0.5) * 0.8, z + (Math.random() - 0.5) * 0.8);
         if (Math.random() > 0.93) this.makePebble(x + (Math.random() - 0.5), z + (Math.random() - 0.5));
 
-        if (t === 'R') this.makeRock(x, z, matRock);
+        if (t === 'R') this.makeRock(r, c, x, z, matRock);
         if (t === 'H') this.makeHole(x, z, matHole);
         if (t === 'T') this.makeTree(x, z);
         if (t === 'W') this.makeWater(x, z, matWater);
@@ -272,11 +274,12 @@ class CrossTheValley {
     p.material = this.material('#b8bcc9', '#8e93a1');
   }
 
-  private makeRock(x: number, z: number, mat: any) {
-    const rock = BABYLON.MeshBuilder.CreateSphere('rock', { diameter: 1.35 }, this.scene);
+  private makeRock(r: number, c: number, x: number, z: number, mat: any) {
+    const rock = BABYLON.MeshBuilder.CreateSphere(`rock-${r}-${c}`, { diameter: 1.35 }, this.scene);
     rock.position.set(x, 0.7, z);
     rock.scaling = new BABYLON.Vector3(1.12, 0.9, 0.92);
     rock.material = mat;
+    this.rockMeshes.set(`${r},${c}`, rock);
   }
 
   private makeHole(x: number, z: number, mat: any) {
@@ -462,7 +465,7 @@ class CrossTheValley {
 
   private actionLabel(a: ProcessAction) {
     return {
-      walk: 'Walk Forward', left: 'Turn Left', right: 'Turn Right', pushRock: 'Push Rock', jump: 'Jump',
+      walk: 'Walk Forward', left: 'Turn Left', right: 'Turn Right', kickRock: 'Kick Rock Aside', jump: 'Jump',
       chopTree: 'Chop Tree', collectWood: 'Collect Wood', buildBoat: 'Build Boat', paddleAcross: 'Paddle Across',
       offerSnack: 'Offer Snack', enterCabin: 'Enter Cabin'
     }[a];
@@ -537,6 +540,9 @@ class CrossTheValley {
 
     let result: ExecResult = { ok: true };
 
+    const before = { r: this.pos.r, c: this.pos.c, dir: this.pos.dir };
+    let executedAction: string = node.type === 'process' ? node.action : 'none';
+
     if (node.type === 'process') {
       result = await this.performAction(node.action, node.id, token);
     } else {
@@ -546,7 +552,14 @@ class CrossTheValley {
       this.setStatus(`${this.decisionLabel(node.condition)} ${yes ? 'Yes' : 'No'}.`);
       await this.wait(180, token);
       const action = yes ? node.onTrue : node.onFalse;
+      executedAction = action;
+      this.setStatus(`Decision chose: ${action === 'none' ? 'Do nothing' : this.actionLabel(action as ProcessAction)}.`);
       if (action !== 'none') result = await this.performAction(action as ProcessAction, node.id, token);
+      console.log('[FlowExec]', { step: this.pointer + 1, blockType: 'decision', decision: node.condition, decisionResult: yes, actionExecuted: action, before, after: { r: this.pos.r, c: this.pos.c, dir: this.pos.dir } });
+    }
+
+    if (node.type === 'process') {
+      console.log('[FlowExec]', { step: this.pointer + 1, blockType: 'process', actionExecuted: executedAction, before, after: { r: this.pos.r, c: this.pos.c, dir: this.pos.dir } });
     }
 
     if (!result.ok) {
@@ -578,7 +591,7 @@ class CrossTheValley {
     return false;
   }
 
-  private async performAction(action: ProcessAction, nodeId: string, token: number): Promise<ExecResult> {
+  private async performAction(action: ProcessAction, _nodeId: string, token: number): Promise<ExecResult> {
     if (token !== this.runnerToken) return { ok: false, message: 'Run interrupted.' };
 
     if (action === 'left' || action === 'right') {
@@ -603,7 +616,7 @@ class CrossTheValley {
     const ahead = this.cell(f.r, f.c);
 
     if (action === 'walk') {
-      if (ahead === 'R') return { ok: false, message: 'A big rock blocks the trail. Try Push Rock first.' };
+      if (ahead === 'R') return { ok: false, message: 'A big rock blocks the trail. Try Kick Rock Aside first.' };
       if (ahead === 'H') return { ok: false, message: 'That step would fall into a hole. Try Jump.' };
       if (ahead === 'T') return { ok: false, message: 'A tree is in the way. Try Chop Tree first.' };
       if (ahead === 'W') return { ok: false, message: 'That is a stream. Build a boat, then paddle across.' };
@@ -616,11 +629,12 @@ class CrossTheValley {
       return { ok: true };
     }
 
-    if (action === 'pushRock') {
-      if (ahead !== 'R') return { ok: false, message: 'Push Rock works only when a rock is directly ahead.' };
+    if (action === 'kickRock') {
+      if (ahead !== 'R') return { ok: false, message: 'There’s no rock to kick.' };
+      await this.kickRockAside(f.r, f.c, token);
       this.setCell(f.r, f.c, '.');
-      await this.moveTo(f.r, f.c, token, false);
-      this.setStatus('Nice push! The path is clear now.');
+      this.drawMiniMap();
+      this.setStatus('Nice kick! The rock rolled into the grass.');
       return { ok: true };
     }
 
@@ -672,6 +686,40 @@ class CrossTheValley {
     }
 
     return { ok: true };
+  }
+
+
+  private async kickRockAside(r: number, c: number, token: number) {
+    const key = `${r},${c}`;
+    const rock = this.rockMeshes.get(key);
+    // kick motion cue on explorer
+    await this.animate(this.player, 'rotation.x', 0, 0.12, 4, token);
+    await this.animate(this.player, 'rotation.x', 0.12, 0, 5, token);
+
+    if (rock) {
+      const side = this.pos.dir === 0 || this.pos.dir === 2 ? 1 : -1;
+      const target = rock.position.clone();
+      if (this.pos.dir === 0 || this.pos.dir === 2) target.x += side * 1.5;
+      else target.z += side * 1.5;
+
+      await this.animate(rock, 'position.y', rock.position.y, rock.position.y + 0.25, 5, token);
+      await this.animate(rock, 'position', rock.position.clone(), target, 10, token);
+      await this.animate(rock, 'rotation.z', 0, 1.3 * side, 10, token);
+      await this.animate(rock, 'position.y', rock.position.y + 0.25, 0.25, 6, token);
+      rock.dispose();
+      this.rockMeshes.delete(key);
+    }
+
+    this.spawnDust(this.pos.c * 2, this.pos.r * 2);
+  }
+
+  private spawnDust(x: number, z: number) {
+    for (let i = 0; i < 5; i++) {
+      const puff = BABYLON.MeshBuilder.CreateSphere(`dust-${Math.random()}`, { diameter: 0.12 + Math.random() * 0.08 }, this.scene);
+      puff.position.set(x + (Math.random() - 0.5) * 0.35, 0.2 + Math.random() * 0.15, z + (Math.random() - 0.5) * 0.35);
+      puff.material = this.material('#d3b38e', '#b79067', 0.7);
+      setTimeout(() => puff.dispose(), 420);
+    }
   }
 
   private async moveTo(r: number, c: number, token: number, arc: boolean) {
