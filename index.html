@@ -26,8 +26,8 @@
 
     #flow{border:2px dashed #bfd0ff;border-radius:14px;background:#f3f7ff;padding:8px;overflow:auto}
     .node{display:flex;align-items:center;gap:6px;background:#fff;border:1px solid #cfddff;border-radius:12px;padding:7px;margin:6px 0}
-    .node.active{outline:3px solid #ffd166}.node.success{outline:2px solid #6ee7b7}
-    .conn{height:10px;margin:0 18px;border-left:2px solid #b6c8ff}.conn.active{border-color:#ffd166}
+    .node.active{outline:3px solid #ffd166}.node.success{outline:2px solid #6ee7b7}.node.error{outline:3px solid #ff7f9f;animation:shake .25s linear 1}
+    .conn{height:10px;margin:0 18px;border-left:2px solid #b6c8ff;background:linear-gradient(180deg,rgba(182,200,255,.15),transparent)}.conn.active{border-color:#ffd166}
     .node select{border:1px solid #cad9ff;background:#f8fbff;border-radius:8px;padding:.2rem}
     .drag{cursor:grab;color:#7a94d8;font-weight:700}
 
@@ -36,6 +36,7 @@
     .run{background:linear-gradient(135deg,#5aa1ff,#58d4c0);color:#07324a}
     .status{min-height:55px;border:1px solid #ccdcff;background:#f4f8ff;border-radius:12px;padding:8px;color:#486092;font-weight:600}
     .status.good{border-color:#93e8cc;background:#e9fff6;color:#0e7b5f}.status.bad{border-color:#ffb1c3;background:#fff1f5;color:#a2334f}
+    @keyframes shake{0%{transform:translateX(0)}25%{transform:translateX(-2px)}50%{transform:translateX(2px)}75%{transform:translateX(-1px)}100%{transform:translateX(0)}}
     @media (max-width:1100px){.app{grid-template-columns:1fr;height:auto;min-height:100vh}.left{min-height:54vh}}
   </style>
 </head>
