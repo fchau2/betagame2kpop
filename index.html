@@ -1,91 +1,1679 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cross the Valley · Module 3 Bonus</title>
-  <style>
-    :root{--bg:#eef5ff;--panel:#ffffff;--ink:#243056;--sub:#5f6f96;--pri:#4f7cff;--ok:#1dbb88;--bad:#ef5b7e;--shadow:0 10px 28px rgba(35,56,123,.16)}
-    *{box-sizing:border-box} body{margin:0;font-family:Inter,Segoe UI,Arial,sans-serif;background:linear-gradient(150deg,#eff5ff,#e6f0ff);color:var(--ink)}
-    .app{height:100vh;display:grid;grid-template-columns:1.62fr 1fr;gap:10px;padding:10px}
-    .card{background:linear-gradient(180deg,#fff,#f6f9ff);border:1px solid #dce7ff;border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
-    .left{position:relative} #renderCanvas{width:100%;height:100%;display:block}
-    .hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;pointer-events:none}
-    .chips{display:flex;gap:6px;flex-wrap:wrap}.chip{background:rgba(255,255,255,.92);border:1px solid #d4e2ff;padding:.38rem .68rem;border-radius:999px;font-weight:700;font-size:.86rem}
-    .mini{position:absolute;left:10px;bottom:10px;width:220px;height:180px;background:rgba(255,255,255,.95);border:1px solid #d4e2ff;border-radius:12px;padding:6px;box-shadow:var(--shadow)}
-    .mini h4{margin:0 0 6px;font-size:.8rem;color:var(--sub)} #miniMap{width:100%;height:calc(100% - 22px);background:#eff4ff;border-radius:10px}
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Factory Logic — Algorithm Design Game</title>
+<style>
+/* =============================================
+   CSS VARIABLES & RESET
+   ============================================= */
+:root {
+  --bg-deep:      #0a0e1a;
+  --bg-panel:     #111827;
+  --bg-card:      #1a2235;
+  --bg-slot:      #0d1420;
+  --border:       #2a3a55;
+  --border-glow:  #3b82f6;
 
-    .right{display:grid;grid-template-rows:auto auto 1fr auto auto;gap:8px;padding:10px}
-    h1{margin:0;font-size:1.12rem} .sub{margin:.15rem 0 0;color:var(--sub);font-size:.84rem}
-    .shape-bank{display:flex;flex-wrap:wrap;gap:8px}
-    .shape{cursor:grab;color:#fff;font-weight:700;padding:.5rem .7rem;border:1px solid rgba(255,255,255,.35);box-shadow:0 6px 14px rgba(41,62,125,.2)}
-    .oval{border-radius:999px;background:linear-gradient(135deg,#44c7ff,#4b7dff)}
-    .rect{border-radius:12px;background:linear-gradient(135deg,#42dcb3,#18b79f)}
-    .diamond{width:48px;height:48px;display:flex;align-items:center;justify-content:center;transform:rotate(45deg);border-radius:8px;background:linear-gradient(135deg,#ffb84d,#ff7a69)}
-    .diamond span{transform:rotate(-45deg);font-size:.72rem}
+  --text-primary: #e2e8f0;
+  --text-muted:   #64748b;
+  --text-dim:     #94a3b8;
 
-    #flow{border:2px dashed #bfd0ff;border-radius:12px;background:#f3f7ff;padding:6px;overflow:auto}
-    .node{display:flex;align-items:center;gap:5px;background:#fff;border:1px solid #cfddff;border-radius:10px;padding:6px;margin:5px 0}
-    .node.active{outline:3px solid #ffd166}.node.success{outline:2px solid #6ee7b7}.node.error{outline:3px solid #ff7f9f;animation:shake .25s linear 1}
-    .conn{height:10px;margin:0 18px;border-left:2px solid #b6c8ff;background:linear-gradient(180deg,rgba(182,200,255,.15),transparent)}.conn.active{border-color:#ffd166}
-    .node select{border:1px solid #cad9ff;background:#f8fbff;border-radius:8px;padding:.2rem}
-    .drag{cursor:grab;color:#7a94d8;font-weight:700}
+  --accent-blue:  #3b82f6;
+  --accent-cyan:  #06b6d4;
+  --accent-green: #22c55e;
+  --accent-red:   #ef4444;
+  --accent-amber: #f59e0b;
+  --accent-purple:#a855f7;
 
-    .controls{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
-    button{border:none;border-radius:9px;padding:.5rem .45rem;font-weight:700;cursor:pointer;background:#e8efff;color:var(--ink)}
-    .run{background:linear-gradient(135deg,#5aa1ff,#58d4c0);color:#07324a}
-    .status{min-height:48px;border:1px solid #ccdcff;background:#f4f8ff;border-radius:10px;padding:7px;color:#486092;font-weight:600;font-size:.9rem}
-    .status.good{border-color:#93e8cc;background:#e9fff6;color:#0e7b5f}.status.bad{border-color:#ffb1c3;background:#fff1f5;color:#a2334f}
-    .success-overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:linear-gradient(180deg,rgba(8,14,38,.2),rgba(8,14,38,.52));z-index:15}
-    .success-overlay.show{display:flex}
-    .success-card{background:linear-gradient(180deg,#fff,#f0f7ff);border:1px solid #c8dcff;border-radius:16px;box-shadow:0 16px 34px rgba(15,41,98,.3);padding:18px 20px;text-align:center;max-width:420px}
-    .success-card h2{margin:0;font-size:1.3rem;color:#204696}
-    .success-card p{margin:8px 0 0;color:#496091;font-weight:600}
-    @keyframes shake{0%{transform:translateX(0)}25%{transform:translateX(-2px)}50%{transform:translateX(2px)}75%{transform:translateX(-1px)}100%{transform:translateX(0)}}
-    @media (max-width:1100px){.app{grid-template-columns:1fr;height:auto;min-height:100vh}.left{min-height:54vh}}
-  </style>
+  --belt-color:   #1e293b;
+  --belt-stripe:  #2d3f5a;
+
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+
+  --shadow-glow-blue:  0 0 18px rgba(59,130,246,0.35);
+  --shadow-glow-green: 0 0 18px rgba(34,197,94,0.4);
+  --shadow-glow-red:   0 0 18px rgba(239,68,68,0.4);
+
+  --font-display: 'Courier New', 'Lucida Console', monospace;
+  --font-body:    'Segoe UI', system-ui, sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* =============================================
+   HEADER
+   ============================================= */
+#header {
+  background: linear-gradient(90deg, #0a0e1a 0%, #111827 50%, #0a0e1a 100%);
+  border-bottom: 1px solid var(--border);
+  padding: 8px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+#header .logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#header .logo-icon {
+  width: 32px; height: 32px;
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px;
+}
+
+#header h1 {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-blue));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: 2px;
+}
+
+#header .subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+#level-indicator {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.level-pip {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  font-family: var(--font-display);
+  transition: all 0.3s;
+}
+
+.level-pip.active {
+  border-color: var(--accent-blue);
+  background: rgba(59,130,246,0.15);
+  color: var(--accent-blue);
+  box-shadow: var(--shadow-glow-blue);
+}
+
+.level-pip.done {
+  border-color: var(--accent-green);
+  background: rgba(34,197,94,0.15);
+  color: var(--accent-green);
+}
+
+/* =============================================
+   MAIN LAYOUT
+   ============================================= */
+#main {
+  flex: 1;
+  display: flex;
+  gap: 0;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* =============================================
+   LEFT PANEL — FACTORY
+   ============================================= */
+#factory-panel {
+  flex: 0 0 52%;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.panel-label {
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ---- FACTORY CANVAS ---- */
+#factory-canvas {
+  flex: 1;
+  background: #080c14;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Animated grid background */
+#factory-canvas::before {
+  content: '';
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(59,130,246,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59,130,246,0.04) 1px, transparent 1px);
+  background-size: 28px 28px;
+  pointer-events: none;
+}
+
+/* ---- CONVEYOR ---- */
+#conveyor-track {
+  position: absolute;
+  left: 0; right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 52px;
+  background: #1a2535;
+  border-top: 3px solid #2a3a55;
+  border-bottom: 3px solid #2a3a55;
+  overflow: hidden;
+}
+
+#belt-stripes {
+  position: absolute; inset: 0;
+  display: flex;
+  gap: 0;
+  animation: beltMove 1s linear infinite paused;
+}
+
+#belt-stripes.running {
+  animation-play-state: running;
+}
+
+@keyframes beltMove {
+  from { transform: translateX(0); }
+  to   { transform: translateX(28px); }
+}
+
+.belt-stripe {
+  flex-shrink: 0;
+  width: 14px; height: 100%;
+  background: repeating-linear-gradient(
+    90deg,
+    #1a2535 0px, #1a2535 10px,
+    #243347 10px, #243347 14px
+  );
+}
+
+/* Scanner gate */
+#scanner-gate {
+  position: absolute;
+  left: 35%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px;
+  height: 90px;
+  background: linear-gradient(180deg, var(--accent-cyan) 0%, transparent 40%, transparent 60%, var(--accent-cyan) 100%);
+  border-radius: 4px;
+  opacity: 0.6;
+  z-index: 5;
+  transition: opacity 0.2s;
+  box-shadow: 0 0 8px var(--accent-cyan);
+}
+
+#scanner-gate.flashing {
+  animation: scanFlash 0.3s ease-in-out 3;
+}
+
+@keyframes scanFlash {
+  0%, 100% { opacity: 0.6; box-shadow: 0 0 8px var(--accent-cyan); }
+  50%       { opacity: 1;   box-shadow: 0 0 30px var(--accent-cyan), 0 0 60px rgba(6,182,212,0.4); }
+}
+
+/* Scanner beam */
+#scanner-beam {
+  position: absolute;
+  left: 35%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 40px;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--accent-cyan), transparent);
+  opacity: 0;
+  z-index: 4;
+  border-radius: 2px;
+  transition: opacity 0.1s;
+}
+
+#scanner-beam.active { opacity: 1; animation: beamScan 0.3s ease-in-out 3; }
+@keyframes beamScan {
+  0%, 100% { opacity: 0; }
+  50%       { opacity: 1; }
+}
+
+/* Conveyor items */
+.factory-item {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 26px;
+  z-index: 10;
+  transition: left 0.6s cubic-bezier(0.4, 0, 0.2, 1), top 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.6));
+  pointer-events: none;
+  line-height: 1;
+}
+
+/* Robot Arm */
+#robot-arm-group {
+  position: absolute;
+  left: 60%;
+  top: 20px;
+  transform: translateX(-50%);
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: left 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#robot-base {
+  width: 32px; height: 14px;
+  background: linear-gradient(180deg, #334155, #1e293b);
+  border: 1px solid #475569;
+  border-radius: 4px 4px 0 0;
+}
+
+#robot-body {
+  width: 20px;
+  height: 60px;
+  background: linear-gradient(180deg, #3b82f6 0%, #1d4ed8 100%);
+  border-radius: 0 0 4px 4px;
+  position: relative;
+  transition: height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#robot-body::after {
+  content: '';
+  position: absolute;
+  left: 50%; bottom: 0;
+  transform: translateX(-50%);
+  width: 12px; height: 12px;
+  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--accent-cyan);
+}
+
+#robot-claw {
+  font-size: 14px;
+  margin-top: 2px;
+  transition: all 0.3s;
+}
+
+/* ---- BINS ---- */
+#bins-area {
+  position: absolute;
+  bottom: 12px;
+  left: 0; right: 0;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 16px;
+  z-index: 8;
+}
+
+.bin {
+  flex: 1;
+  min-width: 0;
+  max-width: 110px;
+  background: linear-gradient(180deg, #1a2535 0%, #111827 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 6px 4px;
+  text-align: center;
+  transition: border-color 0.3s, box-shadow 0.3s;
+  position: relative;
+}
+
+.bin.highlight {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 14px rgba(6,182,212,0.3);
+}
+
+.bin.correct-bin {
+  border-color: var(--accent-green);
+  box-shadow: 0 0 14px rgba(34,197,94,0.3);
+}
+
+.bin.wrong-bin {
+  border-color: var(--accent-red);
+  box-shadow: var(--shadow-glow-red);
+  animation: shakebin 0.4s ease;
+}
+
+@keyframes shakebin {
+  0%, 100% { transform: translateX(0); }
+  25%       { transform: translateX(-4px); }
+  75%       { transform: translateX(4px); }
+}
+
+.bin-label {
+  font-size: 9px;
+  font-family: var(--font-display);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+
+.bin-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.bin-contents {
+  min-height: 24px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+  font-size: 14px;
+}
+
+/* ---- STATUS BAR ---- */
+#factory-status {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: border-color 0.3s, background 0.3s;
+}
+
+#factory-status .status-icon { font-size: 16px; flex-shrink: 0; }
+#factory-status .status-text { flex: 1; color: var(--text-dim); }
+#factory-status.success { border-color: var(--accent-green); background: rgba(34,197,94,0.08); }
+#factory-status.error   { border-color: var(--accent-red);   background: rgba(239,68,68,0.08); }
+#factory-status.running { border-color: var(--accent-cyan);  background: rgba(6,182,212,0.08); }
+
+/* =============================================
+   RIGHT PANEL — ALGORITHM BUILDER
+   ============================================= */
+#builder-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px;
+  gap: 12px;
+  overflow: hidden;
+}
+
+/* ---- LEVEL INFO ---- */
+#level-info {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  flex-shrink: 0;
+}
+
+#level-title {
+  font-family: var(--font-display);
+  font-size: 14px;
+  color: var(--accent-cyan);
+  letter-spacing: 1px;
+  margin-bottom: 3px;
+}
+
+#level-goal {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+#level-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(59,130,246,0.2);
+  background: rgba(59,130,246,0.08);
+  font-size: 11px;
+  color: var(--text-primary);
+}
+
+.meta-label {
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--accent-cyan);
+  text-transform: uppercase;
+}
+
+/* ---- AVAILABLE CARDS ---- */
+#cards-section { flex-shrink: 0; }
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+#cards-section .section-label,
+#program-section .section-label {
+  font-size: 10px;
+  font-family: var(--font-display);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 0;
+}
+
+.section-note {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+#available-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.avail-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.avail-card:hover {
+  border-color: var(--accent-blue);
+  background: rgba(59,130,246,0.12);
+  color: var(--accent-blue);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-glow-blue);
+}
+
+.avail-card:active { transform: translateY(0); }
+
+.avail-card.card-start   { border-color: rgba(34,197,94,0.4);  color: #4ade80; }
+.avail-card.card-end     { border-color: rgba(239,68,68,0.4);  color: #f87171; }
+.avail-card.card-if      { border-color: rgba(59,130,246,0.4); color: #93c5fd; }
+.avail-card.card-else    { border-color: rgba(245,158,11,0.4); color: #fcd34d; }
+.avail-card.card-scan    { border-color: rgba(6,182,212,0.4);  color: #67e8f9; }
+.avail-card.decoy { border-style: dashed; opacity: 0.88; }
+.avail-card.used {
+  opacity: 0.35;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+.avail-card.used:hover {
+  border-color: var(--border);
+  background: var(--bg-card);
+  color: inherit;
+}
+
+/* ---- PROGRAM AREA ---- */
+#program-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+#program-section .section-head {
+  flex-shrink: 0;
+}
+
+#program-slots {
+  flex: 1;
+  background: var(--bg-slot);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Empty state */
+#program-slots .empty-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+  padding: 20px 0;
+  font-family: var(--font-display);
+  letter-spacing: 1px;
+  opacity: 0.6;
+}
+
+/* Placed program cards */
+.prog-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  animation: cardSlideIn 0.15s ease;
+}
+
+@keyframes cardSlideIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.prog-card.executing {
+  border-color: var(--accent-cyan);
+  background: rgba(6,182,212,0.12);
+  box-shadow: 0 0 10px rgba(6,182,212,0.25);
+}
+
+.prog-card.exec-success {
+  border-color: var(--accent-green);
+  background: rgba(34,197,94,0.1);
+}
+
+.prog-card.exec-error {
+  border-color: var(--accent-red);
+  background: rgba(239,68,68,0.1);
+  animation: cardShake 0.3s ease;
+}
+
+@keyframes cardShake {
+  0%, 100% { transform: translateX(0); }
+  25%       { transform: translateX(-4px); }
+  75%       { transform: translateX(4px); }
+}
+
+.prog-step-num {
+  font-family: var(--font-display);
+  font-size: 10px;
+  color: var(--text-muted);
+  min-width: 16px;
+  text-align: right;
+}
+
+.prog-card-label {
+  flex: 1;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+
+.prog-card.card-start .prog-card-label  { color: #4ade80; }
+.prog-card.card-end   .prog-card-label  { color: #f87171; }
+.prog-card.card-if    .prog-card-label  { color: #93c5fd; }
+.prog-card.card-else  .prog-card-label  { color: #fcd34d; }
+.prog-card.card-scan  .prog-card-label  { color: #67e8f9; }
+
+.prog-card-controls {
+  display: flex;
+  gap: 3px;
+}
+
+.ctrl-btn {
+  width: 22px; height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+
+.ctrl-btn:hover { border-color: var(--accent-blue); color: var(--accent-blue); background: rgba(59,130,246,0.1); }
+.ctrl-btn.remove:hover { border-color: var(--accent-red); color: var(--accent-red); background: rgba(239,68,68,0.1); }
+
+/* ---- BUTTONS ---- */
+#controls {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btn {
+  flex: 1;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-transform: uppercase;
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.btn:hover:not(:disabled) { transform: translateY(-1px); }
+.btn:active:not(:disabled) { transform: translateY(0); }
+.btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.btn-run {
+  background: linear-gradient(135deg, rgba(59,130,246,0.2), rgba(6,182,212,0.2));
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+.btn-run:hover:not(:disabled) { background: rgba(59,130,246,0.3); box-shadow: var(--shadow-glow-blue); }
+
+.btn-reset {
+  border-color: rgba(245,158,11,0.5);
+  color: var(--accent-amber);
+}
+.btn-reset:hover:not(:disabled) { background: rgba(245,158,11,0.1); box-shadow: 0 0 14px rgba(245,158,11,0.25); }
+
+.btn-next {
+  background: linear-gradient(135deg, rgba(34,197,94,0.2), rgba(6,182,212,0.15));
+  border-color: var(--accent-green);
+  color: var(--accent-green);
+}
+.btn-next:hover:not(:disabled) { background: rgba(34,197,94,0.3); box-shadow: var(--shadow-glow-green); }
+
+/* =============================================
+   VICTORY SCREEN
+   ============================================= */
+#victory-screen {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(8,12,20,0.95);
+  z-index: 100;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 0;
+  backdrop-filter: blur(8px);
+}
+
+#victory-screen.show { display: flex; }
+
+#victory-box {
+  background: linear-gradient(135deg, #111827, #0f172a);
+  border: 1px solid var(--accent-cyan);
+  border-radius: var(--radius-lg);
+  padding: 40px 48px;
+  max-width: 480px;
+  width: 90%;
+  text-align: center;
+  box-shadow: 0 0 60px rgba(6,182,212,0.2), 0 0 120px rgba(59,130,246,0.1);
+  position: relative;
+  overflow: hidden;
+}
+
+#victory-box::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(circle at 50% 0%, rgba(6,182,212,0.08), transparent 70%);
+  pointer-events: none;
+}
+
+.victory-trophy { font-size: 64px; margin-bottom: 12px; animation: trophyBounce 1s ease infinite alternate; }
+@keyframes trophyBounce {
+  from { transform: translateY(0) scale(1); }
+  to   { transform: translateY(-8px) scale(1.05); }
+}
+
+.victory-title {
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-blue), var(--accent-purple));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 12px;
+}
+
+.victory-msg {
+  font-size: 14px;
+  color: var(--text-dim);
+  line-height: 1.7;
+  margin-bottom: 24px;
+}
+
+.victory-concepts {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 28px;
+}
+
+.concept-tag {
+  background: rgba(59,130,246,0.15);
+  border: 1px solid rgba(59,130,246,0.35);
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--accent-blue);
+  text-transform: uppercase;
+}
+
+.btn-play-again {
+  padding: 12px 36px;
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+  border: none;
+  border-radius: var(--radius-sm);
+  color: white;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: all 0.2s;
+}
+.btn-play-again:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(59,130,246,0.4); }
+
+/* =============================================
+   CONFETTI
+   ============================================= */
+.confetti-piece {
+  position: fixed;
+  width: 8px; height: 8px;
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 200;
+  animation: confettiFall linear forwards;
+}
+
+@keyframes confettiFall {
+  0%   { opacity: 1; transform: translateY(0) rotate(0deg) scale(1); }
+  100% { opacity: 0; transform: translateY(100vh) rotate(720deg) scale(0.3); }
+}
+
+/* =============================================
+   SCROLLBAR
+   ============================================= */
+#program-slots::-webkit-scrollbar { width: 4px; }
+#program-slots::-webkit-scrollbar-track { background: transparent; }
+#program-slots::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* =============================================
+   TRANSITIONS & UTILS
+   ============================================= */
+.pulse-success { animation: pulseGreen 0.5s ease; }
+@keyframes pulseGreen {
+  0%, 100% { box-shadow: none; }
+  50%       { box-shadow: var(--shadow-glow-green); }
+}
+
+/* Execution cursor indicator in program */
+.exec-arrow {
+  font-size: 10px;
+  color: var(--accent-cyan);
+  animation: blink 0.5s ease infinite alternate;
+}
+@keyframes blink { from { opacity: 1; } to { opacity: 0.3; } }
+</style>
 </head>
 <body>
-  <div class="app">
-    <section class="left card">
-      <canvas id="renderCanvas"></canvas>
-      <div class="success-overlay" id="successOverlay">
-        <div class="success-card">
-          <h2 id="successTitle">Level Complete!</h2>
-          <p id="successText">Great algorithm work.</p>
-        </div>
-      </div>
-      <div class="hud">
-        <div class="chips">
-          <span class="chip" id="levelLabel">Level 1</span>
-          <span class="chip" id="stepLabel">Step 0</span>
-          <span class="chip" id="invLabel">Wood: 0</span>
-          <span class="chip" id="limitLabel">Blocks Remaining: 0</span>
-          <span class="chip" id="starLabel">⭐ 0/3</span>
-        </div>
-      </div>
-      <div class="mini"><h4>Mini-map Planner</h4><canvas id="miniMap" width="220" height="182"></canvas></div>
-    </section>
 
-    <section class="right card">
-      <div><h1>Cross the Valley</h1><p class="sub">Module 3 Bonus · Build a flowchart algorithm to reach and enter the cabin.</p></div>
-      <div class="shape-bank" id="shapeBank">
-        <div class="shape oval" draggable="true" data-shape="start">Start / End</div>
-        <div class="shape rect" draggable="true" data-shape="process">Process</div>
-        <div class="shape diamond" draggable="true" data-shape="decision"><span>Decision</span></div>
+<!-- HEADER -->
+<div id="header">
+  <div class="logo">
+    <div class="logo-icon">⚙️</div>
+    <div>
+      <h1>FACTORY LOGIC</h1>
+      <div class="subtitle">Algorithm Design · Module 3</div>
+    </div>
+  </div>
+  <div id="level-indicator">
+    <span style="font-size:11px;color:var(--text-muted);margin-right:4px;font-family:var(--font-display);letter-spacing:1px;">LEVEL</span>
+    <div class="level-pip active" id="pip-1">1</div>
+    <div class="level-pip" id="pip-2">2</div>
+    <div class="level-pip" id="pip-3">3</div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+
+  <!-- LEFT: FACTORY -->
+  <div id="factory-panel">
+    <div class="panel-label">⚙ Factory Simulation</div>
+
+    <div id="factory-canvas">
+      <!-- Conveyor track -->
+      <div id="conveyor-track">
+        <div id="belt-stripes"></div>
       </div>
-      <div id="flow"></div>
-      <div class="controls">
-        <button class="run" id="runBtn">▶ Run</button>
-        <button id="stepBtn">Step Through</button>
-        <button id="resetBtn">Reset</button>
-        <button id="clearBtn">Clear</button>
+      <!-- Scanner gate -->
+      <div id="scanner-gate"></div>
+      <div id="scanner-beam"></div>
+      <!-- Robot arm -->
+      <div id="robot-arm-group">
+        <div id="robot-base"></div>
+        <div id="robot-body"></div>
+        <div id="robot-claw">🦾</div>
       </div>
-      <div class="status" id="status">Drag Process/Decision blocks, choose options, then run.</div>
-    </section>
+      <!-- Items rendered here by JS -->
+      <!-- Bins rendered here by JS -->
+      <div id="bins-area"></div>
+    </div>
+
+    <div id="factory-status">
+      <span class="status-icon">ℹ️</span>
+      <span class="status-text">Build your algorithm, then press RUN to start the factory.</span>
+    </div>
   </div>
 
-  <script src="https://cdn.babylonjs.com/babylon.js"></script>
-  <script src="dist/main.js"></script>
+  <!-- RIGHT: BUILDER -->
+  <div id="builder-panel">
+    <div class="panel-label">⌨ Algorithm Builder</div>
+
+    <div id="level-info">
+      <div id="level-title">LEVEL 1 — BASIC SORTING</div>
+      <div id="level-goal">Sort apples 🍎 and bananas 🍌 into the correct bins using an IF/ELSE condition.</div>
+      <div id="level-meta">
+        <div class="meta-chip"><span class="meta-label">Constraint</span><span id="meta-count">Use exactly 5 cards</span></div>
+        <div class="meta-chip"><span class="meta-label">Challenge</span><span id="meta-challenge">One card in the tray is a decoy.</span></div>
+      </div>
+    </div>
+
+    <div id="cards-section">
+      <div class="section-head">
+        <div class="section-label">Available Cards — choose carefully</div>
+        <div class="section-note">Decoy cards are mixed in.</div>
+      </div>
+      <div id="available-cards"></div>
+    </div>
+
+    <div id="program-section">
+      <div class="section-head">
+        <div class="section-label">Your Program — arrange in order</div>
+        <div class="section-note" id="program-count">0 / 5 cards used</div>
+      </div>
+      <div id="program-slots">
+        <div class="empty-hint">Click cards above to build your program ↑</div>
+      </div>
+    </div>
+
+    <div id="controls">
+      <button class="btn btn-run" id="btn-run" onclick="runProgram()">▶ RUN</button>
+      <button class="btn btn-reset" id="btn-reset" onclick="resetLevel()">↺ RESET</button>
+      <button class="btn btn-next" id="btn-next" onclick="nextLevel()" disabled>NEXT LEVEL ▶</button>
+    </div>
+  </div>
+</div>
+
+<!-- VICTORY SCREEN -->
+<div id="victory-screen">
+  <div id="victory-box">
+    <div class="victory-trophy">🏆</div>
+    <div class="victory-title">FACTORY MASTER</div>
+    <div class="victory-msg">
+      Outstanding work! You programmed the factory through all three challenges — handling basic sorting, multiple conditions, and even unknown items.
+      <br><br>
+      You've used real computer science concepts to keep the factory running smoothly.
+    </div>
+    <div class="victory-concepts">
+      <span class="concept-tag">Sequencing</span>
+      <span class="concept-tag">Conditions</span>
+      <span class="concept-tag">Debugging</span>
+      <span class="concept-tag">Edge Cases</span>
+    </div>
+    <button class="btn-play-again" onclick="playAgain()">PLAY AGAIN</button>
+  </div>
+</div>
+
+<script>
+/* =============================================
+   LEVEL DATA
+   ============================================= */
+const LEVELS = [
+  {
+    id: 1,
+    title: "LEVEL 1 — BASIC SORTING",
+    goal: "Sort apples 🍎 and bananas 🍌 into the correct bins using an IF/ELSE condition.",
+    requiredCount: 5,
+    challenge: "Use exactly 5 cards. One card in the tray is a decoy.",
+    items: ["🍎","🍌","🍎","🍌","🍌"],
+    bins: [
+      { id:"A", label:"Bin A", name:"Apples",  accepts:["🍎"], emoji:"🍎" },
+      { id:"B", label:"Bin B", name:"Bananas", accepts:["🍌"], emoji:"🍌" }
+    ],
+    cards: [
+      { id:"START",     label:"START",                 type:"start" },
+      { id:"SCAN",      label:"SCAN ITEM",             type:"scan"  },
+      { id:"IF_A",      label:"IF APPLE → BIN A",      type:"if",   condition:"🍎", bin:"A" },
+      { id:"ELSE_B",    label:"ELSE → BIN B",          type:"else", bin:"B" },
+      { id:"IF_BA",     label:"IF BANANA → BIN A",     type:"if",   condition:"🍌", bin:"A", decoy:true },
+      { id:"ELSE_A",    label:"ELSE → BIN A",          type:"else", bin:"A", decoy:true },
+      { id:"END",       label:"END",                   type:"end"   }
+    ],
+    solution: ["START","SCAN","IF_A","ELSE_B","END"],
+    concept: "Simple IF / ELSE condition"
+  },
+  {
+    id: 2,
+    title: "LEVEL 2 — MULTIPLE CONDITIONS",
+    goal: "Sort apples 🍎, bananas 🍌, and oranges 🍊 using multiple IF conditions and a final ELSE.",
+    requiredCount: 6,
+    challenge: "Use exactly 6 cards. Two cards in the tray are decoys.",
+    items: ["🍎","🍌","🍊","🍌","🍎","🍊"],
+    bins: [
+      { id:"A", label:"Bin A", name:"Apples",  accepts:["🍎"], emoji:"🍎" },
+      { id:"B", label:"Bin B", name:"Bananas", accepts:["🍌"], emoji:"🍌" },
+      { id:"C", label:"Bin C", name:"Oranges", accepts:["🍊"], emoji:"🍊" }
+    ],
+    cards: [
+      { id:"START",     label:"START",                 type:"start" },
+      { id:"SCAN",      label:"SCAN ITEM",             type:"scan"  },
+      { id:"IF_A",      label:"IF APPLE → BIN A",      type:"if",   condition:"🍎", bin:"A" },
+      { id:"IF_B",      label:"IF BANANA → BIN B",     type:"if",   condition:"🍌", bin:"B" },
+      { id:"ELSE_C",    label:"ELSE → BIN C",          type:"else", bin:"C" },
+      { id:"IF_CB",     label:"IF ORANGE → BIN B",     type:"if",   condition:"🍊", bin:"B", decoy:true },
+      { id:"ELSE_B",    label:"ELSE → BIN B",          type:"else", bin:"B", decoy:true },
+      { id:"END",       label:"END",                   type:"end"   }
+    ],
+    solution: ["START","SCAN","IF_A","IF_B","ELSE_C","END"],
+    concept: "Multiple IF conditions"
+  },
+  {
+    id: 3,
+    title: "LEVEL 3 — UNKNOWN ITEMS",
+    goal: "The factory may receive unknown items 📦. Your algorithm must handle every case, including sending unknowns to the REJECT BIN.",
+    requiredCount: 7,
+    challenge: "Use exactly 7 cards. Two tray cards are decoys. Every item must be safely handled.",
+    items: ["🍎","🍌","📦","🍊","🍌"],
+    bins: [
+      { id:"A",      label:"Bin A",    name:"Apples",  accepts:["🍎"], emoji:"🍎" },
+      { id:"B",      label:"Bin B",    name:"Bananas", accepts:["🍌"], emoji:"🍌" },
+      { id:"C",      label:"Bin C",    name:"Oranges", accepts:["🍊"], emoji:"🍊" },
+      { id:"REJECT", label:"Reject",   name:"Unknown", accepts:["📦"], emoji:"📦" }
+    ],
+    cards: [
+      { id:"START",     label:"START",                 type:"start" },
+      { id:"SCAN",      label:"SCAN ITEM",             type:"scan"  },
+      { id:"IF_A",      label:"IF APPLE → BIN A",      type:"if",   condition:"🍎", bin:"A" },
+      { id:"IF_B",      label:"IF BANANA → BIN B",     type:"if",   condition:"🍌", bin:"B" },
+      { id:"IF_C",      label:"IF ORANGE → BIN C",     type:"if",   condition:"🍊", bin:"C" },
+      { id:"ELSE_R",    label:"ELSE → REJECT BIN",     type:"else", bin:"REJECT" },
+      { id:"IF_UNK_A",  label:"IF UNKNOWN → BIN A",    type:"if",   condition:"📦", bin:"A", decoy:true },
+      { id:"ELSE_C",    label:"ELSE → BIN C",          type:"else", bin:"C", decoy:true },
+      { id:"END",       label:"END",                   type:"end"   }
+    ],
+    solution: ["START","SCAN","IF_A","IF_B","IF_C","ELSE_R","END"],
+    concept: "Edge cases and algorithm completeness"
+  }
+];
+
+/* =============================================
+   GAME STATE
+   ============================================= */
+let currentLevelIdx = 0;
+let program = [];       // array of card IDs in order
+let isRunning = false;
+let levelComplete = false;
+let currentCardOrder = [];
+
+function shuffleArray(arr) {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function getLevelCardById(level, cardId) {
+  return level.cards.find(c => c.id === cardId);
+}
+
+function updateProgramMeta(level = LEVELS[currentLevelIdx]) {
+  const countEl = document.getElementById('program-count');
+  if (countEl) countEl.textContent = `${program.length} / ${level.requiredCount} cards used`;
+}
+
+/* =============================================
+   INIT
+   ============================================= */
+function init() {
+  buildBeltStripes();
+  loadLevel(currentLevelIdx);
+}
+
+function buildBeltStripes() {
+  const belt = document.getElementById('belt-stripes');
+  belt.innerHTML = '';
+  for (let i = 0; i < 80; i++) {
+    const s = document.createElement('div');
+    s.className = 'belt-stripe';
+    belt.appendChild(s);
+  }
+}
+
+/* =============================================
+   LEVEL LOADING
+   ============================================= */
+function loadLevel(idx) {
+  currentLevelIdx = idx;
+  program = [];
+  levelComplete = false;
+  isRunning = false;
+
+  const level = LEVELS[idx];
+  currentCardOrder = shuffleArray(level.cards.map(card => card.id));
+
+  document.querySelectorAll('.level-pip').forEach((pip, i) => {
+    pip.className = 'level-pip';
+    if (i < idx) pip.classList.add('done'), pip.textContent = '✓';
+    else if (i === idx) pip.classList.add('active'), pip.textContent = i + 1;
+    else pip.textContent = i + 1;
+  });
+
+  document.getElementById('level-title').textContent = level.title;
+  document.getElementById('level-goal').textContent = level.goal;
+  document.getElementById('meta-count').textContent = `Use exactly ${level.requiredCount} cards`;
+  document.getElementById('meta-challenge').textContent = level.challenge;
+
+  renderAvailableCards(level);
+  renderProgram();
+  updateProgramMeta(level);
+  renderBins(level);
+  clearFactoryItems();
+
+  setStatus('info', 'Build your algorithm on the right, then press RUN to start the factory.');
+
+  document.getElementById('btn-run').disabled = false;
+  document.getElementById('btn-reset').disabled = false;
+  document.getElementById('btn-next').disabled = true;
+}
+
+/* =============================================
+   RENDER AVAILABLE CARDS
+   ============================================= */
+function renderAvailableCards(level) {
+  const container = document.getElementById('available-cards');
+  container.innerHTML = '';
+  currentCardOrder.forEach(cardId => {
+    const card = getLevelCardById(level, cardId);
+    if (!card) return;
+    const used = program.includes(card.id);
+    const el = document.createElement('div');
+    el.className = `avail-card card-${card.type === 'if' ? 'if' : card.type === 'else' ? 'else' : card.type}`;
+    if (card.decoy) el.classList.add('decoy');
+    if (used) el.classList.add('used');
+    el.textContent = card.label;
+    el.dataset.cardId = card.id;
+    el.title = used ? 'Already in your program' : 'Click to add to your program';
+    if (!used) el.addEventListener('click', () => addCardToProgram(card.id));
+    container.appendChild(el);
+  });
+}
+
+/* =============================================
+   PROGRAM MANAGEMENT
+   ============================================= */
+function addCardToProgram(cardId) {
+  if (isRunning) return;
+  const level = LEVELS[currentLevelIdx];
+  if (program.includes(cardId)) {
+    setStatus('info', 'That card is already in your program. Use each card at most once.');
+    return;
+  }
+  if (program.length >= level.requiredCount) {
+    setStatus('info', `This level only allows ${level.requiredCount} cards. Remove one before adding another.`);
+    return;
+  }
+  program.push(cardId);
+  renderProgram();
+  renderAvailableCards(level);
+  updateProgramMeta(level);
+}
+
+function moveCard(index, direction) {
+  if (isRunning) return;
+  const newIndex = index + direction;
+  if (newIndex < 0 || newIndex >= program.length) return;
+  [program[index], program[newIndex]] = [program[newIndex], program[index]];
+  renderProgram();
+  updateProgramMeta();
+}
+
+function removeCard(index) {
+  if (isRunning) return;
+  program.splice(index, 1);
+  renderProgram();
+  renderAvailableCards(LEVELS[currentLevelIdx]);
+  updateProgramMeta();
+}
+
+function renderProgram() {
+  const slots = document.getElementById('program-slots');
+  slots.innerHTML = '';
+
+  if (program.length === 0) {
+    const hint = document.createElement('div');
+    hint.className = 'empty-hint';
+    hint.textContent = 'Click cards above to build your program ↑';
+    slots.appendChild(hint);
+    updateProgramMeta();
+    return;
+  }
+
+  const level = LEVELS[currentLevelIdx];
+  program.forEach((cardId, i) => {
+    const cardDef = getLevelCardById(level, cardId);
+    if (!cardDef) return;
+
+    const el = document.createElement('div');
+    el.className = `prog-card card-${cardDef.type === 'if' ? 'if' : cardDef.type === 'else' ? 'else' : cardDef.type}`;
+    el.id = `prog-${i}`;
+
+    el.innerHTML = `
+      <span class="prog-step-num">${i + 1}</span>
+      <span class="prog-card-label">${cardDef.label}</span>
+      <div class="prog-card-controls">
+        <button class="ctrl-btn" title="Move up" onclick="moveCard(${i}, -1)">▲</button>
+        <button class="ctrl-btn" title="Move down" onclick="moveCard(${i}, 1)">▼</button>
+        <button class="ctrl-btn remove" title="Remove" onclick="removeCard(${i})">✕</button>
+      </div>
+    `;
+    slots.appendChild(el);
+  });
+  updateProgramMeta(level);
+}
+
+
+/* =============================================
+   BIN RENDERING
+   ============================================= */
+function renderBins(level) {
+  const binsArea = document.getElementById('bins-area');
+  binsArea.innerHTML = '';
+  level.bins.forEach(bin => {
+    const el = document.createElement('div');
+    el.className = 'bin';
+    el.id = `bin-${bin.id}`;
+    el.innerHTML = `
+      <div class="bin-label">${bin.label}</div>
+      <div class="bin-name">${bin.name}</div>
+      <div class="bin-contents" id="bin-contents-${bin.id}"></div>
+    `;
+    binsArea.appendChild(el);
+  });
+}
+
+function clearBinContents() {
+  const level = LEVELS[currentLevelIdx];
+  level.bins.forEach(bin => {
+    const c = document.getElementById(`bin-contents-${bin.id}`);
+    if (c) c.innerHTML = '';
+    const b = document.getElementById(`bin-${bin.id}`);
+    if (b) b.className = 'bin';
+  });
+}
+
+function addItemToBin(binId, emoji, isCorrect) {
+  const contents = document.getElementById(`bin-contents-${binId}`);
+  if (!contents) return;
+  const span = document.createElement('span');
+  span.textContent = emoji;
+  contents.appendChild(span);
+
+  const binEl = document.getElementById(`bin-${binId}`);
+  if (binEl) {
+    binEl.classList.remove('highlight','correct-bin','wrong-bin');
+    binEl.classList.add(isCorrect ? 'correct-bin' : 'wrong-bin');
+    setTimeout(() => {
+      binEl.classList.remove('correct-bin','wrong-bin');
+    }, 700);
+  }
+}
+
+/* =============================================
+   FACTORY ITEM RENDERING (conveyor items)
+   ============================================= */
+function clearFactoryItems() {
+  document.querySelectorAll('.factory-item').forEach(el => el.remove());
+}
+
+function getCanvasRect() {
+  return document.getElementById('factory-canvas').getBoundingClientRect();
+}
+
+/* =============================================
+   STATUS HELPER
+   ============================================= */
+function setStatus(type, message, icon) {
+  const el = document.getElementById('factory-status');
+  el.className = 'factory-status';
+  if (type === 'success') { el.className += ' success'; icon = icon || '✅'; }
+  else if (type === 'error') { el.className += ' error'; icon = icon || '❌'; }
+  else if (type === 'running') { el.className += ' running'; icon = icon || '⚙️'; }
+  else icon = icon || 'ℹ️';
+
+  el.querySelector('.status-icon').textContent = icon;
+  el.querySelector('.status-text').textContent = message;
+}
+
+/* =============================================
+   ALGORITHM VALIDATION
+   ============================================= */
+function validateProgram(level) {
+  if (program.length !== level.requiredCount) {
+    return { valid: false, msg: `Constraint not met. Use exactly ${level.requiredCount} cards for this level.` };
+  }
+  if (!program.includes('START') || !program.includes('END')) {
+    return { valid: false, msg: 'Algorithm incomplete. Your program must include START and END cards.' };
+  }
+  if (program[0] !== 'START') {
+    return { valid: false, msg: 'Algorithm error: START must be the first card.' };
+  }
+  if (program[program.length - 1] !== 'END') {
+    return { valid: false, msg: 'Algorithm error: END must be the last card.' };
+  }
+
+  const scanIdx = program.indexOf('SCAN');
+  if (scanIdx === -1) {
+    return { valid: false, msg: 'Algorithm incomplete. You need a SCAN ITEM card before the factory can make decisions.' };
+  }
+  if (scanIdx !== 1) {
+    return { valid: false, msg: 'Algorithm error: SCAN ITEM should come right after START so the factory checks each item first.' };
+  }
+
+  const elseIndices = program.map((cardId, idx) => cardId.startsWith('ELSE') ? idx : -1).filter(idx => idx !== -1);
+  if (elseIndices.length > 1) {
+    return { valid: false, msg: 'Algorithm error: use only one ELSE card in this factory.' };
+  }
+  if (elseIndices.length === 1) {
+    const elseIdx = elseIndices[0];
+    const ifBefore = program.slice(scanIdx + 1, elseIdx).filter(id => getLevelCardById(level, id)?.type === 'if');
+    if (ifBefore.length === 0) {
+      return { valid: false, msg: 'Algorithm error: ELSE must come after at least one IF condition.' };
+    }
+  }
+
+  const cardsAfterScan = program.slice(scanIdx + 1, program.length - 1).map(id => getLevelCardById(level, id));
+  if (cardsAfterScan.some(card => !card || !['if','else'].includes(card.type))) {
+    return { valid: false, msg: 'Algorithm error: after SCAN ITEM, only IF and ELSE sorting cards should appear before END.' };
+  }
+
+  const requiredItems = [...new Set(level.items)];
+  const covered = new Set(cardsAfterScan.filter(card => card.type === 'if').map(card => card.condition));
+  const hasElse = cardsAfterScan.some(card => card.type === 'else');
+  const missingItems = requiredItems.filter(item => !covered.has(item));
+  if (missingItems.length > 0 && !hasElse) {
+    return { valid: false, msg: `Your algorithm never handles ${missingItems.map(getItemName).join(', ')}. Add a matching IF card or a safe ELSE rule.` };
+  }
+
+  return { valid: true };
+}
+
+function sortItem(item, programCards, level) {
+  let scanSeen = false;
+
+  for (const cardId of programCards) {
+    const cardDef = getLevelCardById(level, cardId);
+    if (!cardDef) continue;
+
+    if (cardDef.type === 'scan') { scanSeen = true; continue; }
+    if (!scanSeen) continue;
+    if (cardDef.type === 'start' || cardDef.type === 'end') continue;
+
+    if (cardDef.type === 'if' && item === cardDef.condition) {
+      return { bin: cardDef.bin, cardId };
+    }
+
+    if (cardDef.type === 'else') {
+      return { bin: cardDef.bin, cardId };
+    }
+  }
+  return null; // no handler
+}
+
+/* =============================================
+   ANIMATION HELPERS
+   ============================================= */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function highlightProgramCard(index, state) {
+  // Remove all highlights
+  document.querySelectorAll('.prog-card').forEach(el => {
+    el.classList.remove('executing','exec-success','exec-error');
+  });
+  const el = document.getElementById(`prog-${index}`);
+  if (el && state) el.classList.add(state);
+}
+
+function clearProgramHighlights() {
+  document.querySelectorAll('.prog-card').forEach(el => {
+    el.classList.remove('executing','exec-success','exec-error');
+  });
+}
+
+async function animateBelt(run) {
+  const belt = document.getElementById('belt-stripes');
+  if (run) belt.classList.add('running');
+  else belt.classList.remove('running');
+}
+
+async function animateScanner() {
+  const gate = document.getElementById('scanner-gate');
+  const beam = document.getElementById('scanner-beam');
+  gate.classList.add('flashing');
+  beam.classList.add('active');
+  await sleep(900);
+  gate.classList.remove('flashing');
+  beam.classList.remove('active');
+}
+
+function getRobotTargetX(binId, level) {
+  // Map bin to approximate x% position
+  const binCount = level.bins.length;
+  const binIdx = level.bins.findIndex(b => b.id === binId);
+  // Bins area spans roughly 10% to 90%
+  const span = 80;
+  const step = span / (binCount + 1);
+  return 10 + step * (binIdx + 1);
+}
+
+async function animateRobotArm(binId, level) {
+  const robot = document.getElementById('robot-arm-group');
+  const targetXPct = getRobotTargetX(binId, level);
+  robot.style.left = `${targetXPct}%`;
+  robot.style.transition = 'left 0.5s cubic-bezier(0.4,0,0.2,1)';
+
+  // Extend arm
+  const body = document.getElementById('robot-body');
+  body.style.height = '80px';
+  await sleep(500);
+  body.style.height = '60px';
+  await sleep(300);
+}
+
+async function moveItemAcrossConveyor(itemEl, startPct, endPct, duration) {
+  itemEl.style.transition = `left ${duration}ms cubic-bezier(0.4,0,0.2,1)`;
+  itemEl.style.left = `${startPct}%`;
+  await sleep(50);
+  itemEl.style.left = `${endPct}%`;
+  await sleep(duration);
+}
+
+async function dropItemIntoBin(itemEl, binId, level) {
+  const binEl = document.getElementById(`bin-${binId}`);
+  if (!binEl) { itemEl.remove(); return; }
+
+  const canvas = document.getElementById('factory-canvas');
+  const canvasRect = canvas.getBoundingClientRect();
+  const binRect = binEl.getBoundingClientRect();
+
+  const targetLeft = (binRect.left - canvasRect.left + binRect.width / 2) / canvasRect.width * 100;
+  const targetTop = (binRect.top - canvasRect.top) / canvasRect.height * 100;
+
+  itemEl.style.transition = 'left 0.35s ease-in, top 0.35s ease-in, opacity 0.2s 0.3s';
+  itemEl.style.left = `${targetLeft}%`;
+  itemEl.style.top = `${targetTop + 8}%`;
+  itemEl.style.opacity = '0';
+  await sleep(450);
+  itemEl.remove();
+}
+
+/* =============================================
+   PROGRAM EXECUTION — MAIN ANIMATION LOOP
+   ============================================= */
+async function runProgram() {
+  if (isRunning) return;
+
+  const level = LEVELS[currentLevelIdx];
+  const val = validateProgram(level);
+  if (!val.valid) {
+    setStatus('error', val.msg);
+    return;
+  }
+
+  isRunning = true;
+  levelComplete = false;
+  document.getElementById('btn-run').disabled = true;
+  document.getElementById('btn-next').disabled = true;
+
+  clearBinContents();
+  clearFactoryItems();
+  clearProgramHighlights();
+
+  await animateBelt(true);
+  setStatus('running', 'Factory starting... processing items.');
+
+  const startIdx = program.indexOf('START');
+  highlightProgramCard(startIdx, 'executing');
+  await sleep(450);
+
+  let correctCount = 0;
+  const errors = [];
+
+  for (let itemNum = 0; itemNum < level.items.length; itemNum++) {
+    const item = level.items[itemNum];
+    const itemEl = document.createElement('div');
+    itemEl.className = 'factory-item';
+    itemEl.textContent = item;
+    itemEl.style.left = '-5%';
+    itemEl.style.top = '50%';
+    document.getElementById('factory-canvas').appendChild(itemEl);
+
+    setStatus('running', `Processing item ${itemNum + 1} of ${level.items.length}: ${item}`);
+    await moveItemAcrossConveyor(itemEl, -5, 32, 700);
+
+    const scanIdx = program.indexOf('SCAN');
+    if (scanIdx !== -1) highlightProgramCard(scanIdx, 'executing');
+    await animateScanner();
+    await sleep(180);
+
+    const result = sortItem(item, program, level);
+    const correctBin = level.bins.find(b => b.accepts.includes(item));
+    const correctBinId = correctBin ? correctBin.id : null;
+
+    let assignedBin = null;
+    let handlerCardIdx = -1;
+
+    if (result) {
+      assignedBin = result.bin;
+      handlerCardIdx = program.indexOf(result.cardId);
+    } else {
+      assignedBin = level.bins[0].id;
+      errors.push(`No sorting rule matched ${getItemName(item)}.`);
+    }
+
+    const isItemCorrect = assignedBin === correctBinId;
+    if (isItemCorrect) correctCount += 1;
+    else {
+      const assignedBinDef = level.bins.find(b => b.id === assignedBin);
+      const assignedName = assignedBinDef ? assignedBinDef.name : assignedBin;
+      const correctName = correctBin ? correctBin.name : 'the correct bin';
+      errors.push(`${getItemName(item)} was sent to ${assignedName} instead of ${correctName}.`);
+    }
+
+    if (handlerCardIdx !== -1) {
+      highlightProgramCard(handlerCardIdx, isItemCorrect ? 'exec-success' : 'exec-error');
+    }
+
+    await moveItemAcrossConveyor(itemEl, 32, 56, 400);
+    await animateRobotArm(assignedBin, level);
+    await sleep(180);
+    await dropItemIntoBin(itemEl, assignedBin, level);
+    addItemToBin(assignedBin, item, isItemCorrect);
+    await sleep(260);
+
+    clearProgramHighlights();
+    if (startIdx !== -1) highlightProgramCard(startIdx, 'executing');
+  }
+
+  const endIdx = program.indexOf('END');
+  const allCorrect = correctCount === level.items.length;
+  if (endIdx !== -1) highlightProgramCard(endIdx, allCorrect ? 'exec-success' : 'exec-error');
+  await sleep(350);
+  clearProgramHighlights();
+
+  await animateBelt(false);
+  document.getElementById('robot-arm-group').style.left = '60%';
+
+  isRunning = false;
+  document.getElementById('btn-run').disabled = false;
+
+  const scorePct = Math.round((correctCount / level.items.length) * 100);
+  if (allCorrect) {
+    levelComplete = true;
+    document.getElementById('btn-next').disabled = false;
+    setStatus('success', `✓ Level complete! ${correctCount}/${level.items.length} items sorted correctly. Factory efficiency: ${scorePct}%.`);
+    spawnConfetti();
+  } else {
+    const firstError = errors[0] || 'Sorting error detected.';
+    const extraHint = scorePct >= 60 ? 'Close — one logic rule is still off.' : 'Re-check which cards belong and whether ELSE is sending items to the right place.';
+    setStatus('error', `Factory efficiency: ${scorePct}% (${correctCount}/${level.items.length} correct). ${firstError} ${extraHint}`);
+  }
+}
+
+function getItemName(emoji) {
+  const names = { '🍎':'Apple','🍌':'Banana','🍊':'Orange','📦':'Unknown Item' };
+  return names[emoji] || emoji;
+}
+
+/* =============================================
+   RESET
+   ============================================= */
+function resetLevel() {
+  if (isRunning) return;
+  const level = LEVELS[currentLevelIdx];
+  program = [];
+  levelComplete = false;
+  currentCardOrder = shuffleArray(level.cards.map(card => card.id));
+  clearFactoryItems();
+  clearBinContents();
+  clearProgramHighlights();
+  renderProgram();
+  renderAvailableCards(level);
+  updateProgramMeta(level);
+  animateBelt(false);
+  document.getElementById('robot-arm-group').style.left = '60%';
+  document.getElementById('btn-run').disabled = false;
+  document.getElementById('btn-next').disabled = true;
+  setStatus('info', 'Program cleared. The card tray has been reshuffled for another attempt.');
+}
+
+/* =============================================
+   NEXT LEVEL
+   ============================================= */
+function nextLevel() {
+  if (!levelComplete) return;
+  if (currentLevelIdx + 1 >= LEVELS.length) {
+    showVictory();
+    return;
+  }
+  loadLevel(currentLevelIdx + 1);
+}
+
+/* =============================================
+   CONFETTI
+   ============================================= */
+function spawnConfetti() {
+  const colors = ['#3b82f6','#06b6d4','#22c55e','#f59e0b','#a855f7','#ec4899','#67e8f9'];
+  for (let i = 0; i < 60; i++) {
+    const el = document.createElement('div');
+    el.className = 'confetti-piece';
+    el.style.left = Math.random() * 100 + 'vw';
+    el.style.top = '-10px';
+    el.style.background = colors[Math.floor(Math.random() * colors.length)];
+    el.style.transform = `rotate(${Math.random()*360}deg)`;
+    el.style.animationDuration = (1.5 + Math.random() * 2) + 's';
+    el.style.animationDelay = (Math.random() * 0.8) + 's';
+    el.style.borderRadius = Math.random() > 0.5 ? '50%' : '2px';
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 4000);
+  }
+}
+
+/* =============================================
+   VICTORY SCREEN
+   ============================================= */
+function showVictory() {
+  spawnConfetti();
+  setTimeout(spawnConfetti, 600);
+  document.getElementById('victory-screen').classList.add('show');
+}
+
+function playAgain() {
+  document.getElementById('victory-screen').classList.remove('show');
+  loadLevel(0);
+}
+
+/* =============================================
+   KEYBOARD SUPPORT
+   ============================================= */
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !isRunning) {
+    const runBtn = document.getElementById('btn-run');
+    if (!runBtn.disabled) runProgram();
+  }
+  if (e.key === 'r' || e.key === 'R') {
+    if (!isRunning) resetLevel();
+  }
+});
+
+/* =============================================
+   START THE GAME
+   ============================================= */
+init();
+</script>
 </body>
 </html>
