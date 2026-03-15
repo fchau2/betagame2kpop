@@ -10,6 +10,11 @@ class CrossTheValley {
         this.invEl = document.getElementById('invLabel');
         this.limitEl = document.getElementById('limitLabel');
         this.starEl = document.getElementById('starLabel');
+        this.successOverlay = document.getElementById('successOverlay');
+        this.successTitle = document.getElementById('successTitle');
+        this.successText = document.getElementById('successText');
+        this.animatedConveyors = [];
+        this.animatedArms = [];
         this.nodes = [];
         this.runnerToken = 0;
         this.runMode = 'idle';
@@ -60,15 +65,16 @@ class CrossTheValley {
         this.scene = this.buildScene();
         this.wireUI();
         this.loadLevel(0, true);
+        this.scene.onBeforeRenderObservable.add(() => this.animateFactoryProps());
         this.engine.runRenderLoop(() => this.scene.render());
         window.addEventListener('resize', () => this.engine.resize());
     }
     buildScene() {
         const scene = new BABYLON.Scene(this.engine);
-        scene.clearColor = new BABYLON.Color4(0.7, 0.88, 1, 1);
+        scene.clearColor = new BABYLON.Color4(0.93, 0.96, 1, 1);
         scene.fogMode = BABYLON.Scene.FOGMODE_EXP;
-        scene.fogDensity = 0.009;
-        scene.fogColor = new BABYLON.Color3(0.79, 0.9, 1);
+        scene.fogDensity = 0.007;
+        scene.fogColor = new BABYLON.Color3(0.88, 0.92, 0.99);
         const hemi = new BABYLON.HemisphericLight('hemi', new BABYLON.Vector3(0, 1, 0), scene);
         hemi.intensity = 0.78;
         const sun = new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-0.35, -1, -0.18), scene);
@@ -128,6 +134,7 @@ class CrossTheValley {
         this.highlightBranch = '';
         this.levelIndex = index;
         this.disposeWorld();
+        this.successOverlay.classList.remove('show');
         if (!keepFlow)
             this.nodes = [];
         this.wood = 0;
@@ -146,6 +153,8 @@ class CrossTheValley {
     disposeWorld() {
         this.scene.meshes.slice().forEach((m) => m.dispose());
         this.obstacleMeshes.clear();
+        this.animatedConveyors = [];
+        this.animatedArms = [];
     }
     parsePath(path) {
         return path.split('').filter((ch) => ch !== '.').map((ch) => {
@@ -173,7 +182,7 @@ class CrossTheValley {
         const width = count * 3.2 + 26;
         const terrain = BABYLON.MeshBuilder.CreateGround('terrain', { width, height: 30 }, this.scene);
         terrain.position.set((count - 1) * 1.6, -0.04, 0);
-        terrain.material = this.material('#82c36e', '#68a95a');
+        terrain.material = this.material('#dce5f4', '#bcc8dd');
         const pathRibbon = [];
         for (let i = 0; i < count; i++) {
             const x = i * 3.2;
@@ -182,7 +191,7 @@ class CrossTheValley {
             const tile = BABYLON.MeshBuilder.CreateGround(`path-${i}`, { width: 2.8, height: 2.1 }, this.scene);
             tile.position.set(x, 0, z);
             tile.rotation.y = Math.sin(i * 0.4) * 0.1;
-            tile.material = this.material('#c69b67', '#ab7f4f');
+            tile.material = this.material('#8b949f', '#6f7782');
             pathRibbon.push(tile);
             if (Math.random() > 0.4)
                 this.makeBush(x + (Math.random() - 0.5) * 3.6, z + (Math.random() - 0.5) * 2.8);
@@ -191,6 +200,8 @@ class CrossTheValley {
             if (Math.random() > 0.75)
                 this.makePebble(x + (Math.random() - 0.5) * 3.8, z + (Math.random() - 0.5) * 3.2);
         }
+        this.makeConveyors(count);
+        this.makeRobotArms(count);
         this.makeFences(count);
         for (let i = 0; i < count; i++)
             this.spawnSegmentVisual(i, this.segmentKinds[i]);
@@ -262,6 +273,30 @@ class CrossTheValley {
         win.position.set(p.x, 1.0, p.z + 1.1);
         win.material = this.material('#ffd285', '#f6b85c', 0.95);
     }
+    makeConveyors(count) {
+        for (let i = 0; i < Math.max(2, Math.floor(count / 2)); i++) {
+            const idx = Math.min(count - 1, i * 2 + 1);
+            const p = this.checkpoints[idx];
+            const belt = BABYLON.MeshBuilder.CreateGround(`conv-${i}`, { width: 3.1, height: 1.1 }, this.scene);
+            belt.position.set(p.x, 0.02, p.z - 2.6);
+            belt.rotation.y = 0.08;
+            belt.material = this.material('#505866', '#3f4552');
+            this.animatedConveyors.push(belt);
+        }
+    }
+    makeRobotArms(count) {
+        for (let i = 0; i < Math.max(2, Math.floor(count / 3)); i++) {
+            const idx = Math.min(count - 1, i * 3 + 2);
+            const p = this.checkpoints[idx];
+            const base = BABYLON.MeshBuilder.CreateCylinder(`arm-base-${i}`, { diameter: 0.7, height: 0.5 }, this.scene);
+            base.position.set(p.x + 2.1, 0.25, p.z + 2.2);
+            base.material = this.material('#5d6673', '#4b5360');
+            const arm = BABYLON.MeshBuilder.CreateBox(`arm-link-${i}`, { width: 0.35, height: 1.4, depth: 0.35 }, this.scene);
+            arm.position.set(p.x + 2.1, 1.0, p.z + 2.2);
+            arm.material = this.material('#8c97a8', '#6f7b8f');
+            this.animatedArms.push(arm);
+        }
+    }
     makeFences(count) {
         const minX = -4;
         const maxX = this.checkpoints[count - 1].x + 4;
@@ -280,6 +315,15 @@ class CrossTheValley {
         group.position = this.checkpoints[0].clone();
         group.rotation = new BABYLON.Vector3(0, 0, 0);
         return group;
+    }
+    animateFactoryProps() {
+        const t = performance.now() * 0.001;
+        this.animatedConveyors.forEach((belt, i) => {
+            belt.position.x += Math.sin(t * 2.4 + i) * 0.0025;
+        });
+        this.animatedArms.forEach((arm, i) => {
+            arm.rotation.z = Math.sin(t * 2 + i * 1.3) * 0.45;
+        });
     }
     refreshFlow(activeId = '') {
         this.flow.innerHTML = '';
@@ -519,7 +563,7 @@ class CrossTheValley {
             if (ahead === 'void')
                 return { ok: false, message: 'Cannot move forward from here.' };
             if (['rock', 'hole', 'tree', 'stream', 'animal'].includes(ahead)) {
-                return { ok: false, message: `Path blocked ahead by ${ahead}.` };
+                return { ok: false, message: `Action blocked: ${ahead} ahead. Try a matching action first.` };
             }
             await this.moveToIndex(aheadIndex, token, false);
             if (this.checkpointIndex === this.cabinEntranceIndex)
@@ -538,7 +582,7 @@ class CrossTheValley {
             target.z += 1.8;
             await this.animate(mesh, 'position', mesh.position.clone(), target, 11, token);
             this.segmentKinds[aheadIndex] = 'path';
-            this.setStatus('Rock kicked aside. Path is clear.');
+            this.setStatus('Great kick! The path segment is clear.');
             return { ok: true };
         }
         if (action === 'jump') {
@@ -564,7 +608,7 @@ class CrossTheValley {
         if (action === 'collectWood') {
             this.wood += 1;
             this.updateHUD();
-            this.setStatus('Wood collected. Great planning!');
+            this.setStatus('Wood secured. You can use it for the next build step.');
             return { ok: true };
         }
         if (action === 'buildBoat') {
@@ -573,7 +617,7 @@ class CrossTheValley {
             this.wood -= 1;
             this.hasBoat = true;
             this.updateHUD();
-            this.setStatus('Boat ready!');
+            this.setStatus('Boat assembled. You can paddle the stream now.');
             return { ok: true };
         }
         if (action === 'paddleAcross') {
@@ -592,7 +636,7 @@ class CrossTheValley {
             this.segmentKinds[aheadIndex] = 'path';
             (_b = this.obstacleMeshes.get(aheadIndex)) === null || _b === void 0 ? void 0 : _b.dispose();
             this.obstacleMeshes.delete(aheadIndex);
-            this.setStatus('The animal happily moves aside.');
+            this.setStatus('Snack accepted! The animal moved aside.');
             return { ok: true };
         }
         return { ok: true };
@@ -638,10 +682,14 @@ class CrossTheValley {
     onSuccess() {
         this.runMode = 'success';
         this.flow.querySelectorAll('.node').forEach((n) => n.classList.add('success'));
-        this.setStatus(`Success! You reached home and entered the cabin. ⭐ ${this.computeStars()}/3`, 'good');
+        const stars = this.computeStars();
+        this.successTitle.textContent = `Level Cleared · ${stars}/3 Stars`;
+        this.successText.textContent = 'Your algorithm completed every required step. Preparing next station...';
+        this.successOverlay.classList.add('show');
+        this.setStatus(`Success! You reached home and entered the cabin. ⭐ ${stars}/3`, 'good');
         this.updateHUD();
         if (this.levelIndex < this.levels.length - 1)
-            setTimeout(() => this.loadLevel(this.levelIndex + 1), 1400);
+            setTimeout(() => this.loadLevel(this.levelIndex + 1), 1700);
     }
     computeStars() {
         let stars = 0;
